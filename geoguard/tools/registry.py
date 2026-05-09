@@ -5,7 +5,7 @@ from typing import Callable
 
 from pydantic_ai.toolsets import FunctionToolset
 
-from geoguard.metadata import EventType
+from geoguard.schemas import EventType
 
 
 class ToolRegistry:
