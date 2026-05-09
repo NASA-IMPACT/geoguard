@@ -67,6 +67,21 @@ DEFAULT_INSTRUCTIONS = (
 )
 
 
+CLAIM_GROUP_INSTRUCTIONS = (
+    "Identify each distinct event described in the input. Information that "
+    "shares location, time, and a causal chain describes the SAME event — "
+    "group all such claims under ONE ClaimGroup. Do not create separate "
+    "groups for different aspects of the same event (cause, impact, response).\n\n"
+    "For each event, extract:\n"
+    "1. Structured metadata (event_type, location, time_range, entities, and "
+    "event-specific fields).\n"
+    "2. Atomic, decontextualized claims about it. (See the Claim schema's "
+    "field description for the full decontextualization rule.)\n\n"
+    "Skip opinions, hedges, and meta-commentary. "
+    "Leave any field you cannot confidently extract as None."
+)
+
+
 class MetadataExtractor:
     def __init__(
         self,
