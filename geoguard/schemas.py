@@ -1,4 +1,11 @@
+from enum import StrEnum
+
 from pydantic import BaseModel
+
+
+class EventType(StrEnum):
+    FLOOD = "flood"
+    OTHER = "other"
 
 
 class ImageRef(BaseModel):

@@ -1,5 +1,4 @@
 from datetime import datetime
-from enum import StrEnum
 from typing import Annotated, Literal
 
 from pydantic import BaseModel, Field
@@ -8,12 +7,7 @@ from pydantic_ai.capabilities import Thinking
 
 from .claims import Claim
 from .config import ReasoningEffort, settings
-from .schemas import Input
-
-
-class EventType(StrEnum):
-    FLOOD = "flood"
-    OTHER = "other"
+from .schemas import EventType, Input
 
 
 class GeoLocation(BaseModel):
