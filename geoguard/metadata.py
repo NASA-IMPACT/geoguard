@@ -6,6 +6,7 @@ from pydantic import BaseModel, Field
 from pydantic_ai import Agent
 from pydantic_ai.capabilities import Thinking
 
+from .claims import Claim
 from .config import ReasoningEffort, settings
 from .schemas import Input
 
@@ -51,11 +52,17 @@ Metadata = Annotated[
 ]
 
 
+class ClaimGroup(BaseModel):
+    metadata: Metadata
+    claims: list[Claim]
+
+
 DEFAULT_INSTRUCTIONS = (
     "Extract structured geospatial metadata from the input. "
-    "Classify the event_type (flood or other) and fill in the fields relevant "
-    "to that event type. Use 'other' with only the base fields when you cannot "
-    "confidently classify the event. "
+    "Identify each distinct event described in the input and return one entry "
+    "per event. For each, classify the event_type (flood or other) and fill in "
+    "the fields relevant to that event type. Use 'other' with only the base "
+    "fields when you cannot confidently classify the event. "
     "Leave any field you cannot confidently extract as None."
 )
 
@@ -66,7 +73,7 @@ class MetadataExtractor:
         model: str | None = None,
         reasoning_effort: ReasoningEffort | None = None,
         instructions: str | None = None,
-        output_type=Metadata,
+        output_type=list[Metadata],
     ):
         self._agent = Agent(
             model=model or settings.model,
@@ -77,6 +84,6 @@ class MetadataExtractor:
             instructions=instructions or DEFAULT_INSTRUCTIONS,
         )
 
-    async def __call__(self, inp: Input) -> Metadata:
+    async def __call__(self, inp: Input) -> list[Metadata]:
         result = await self._agent.run(inp.text)
         return result.output
