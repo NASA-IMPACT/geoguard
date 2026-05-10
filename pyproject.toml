@@ -9,6 +9,10 @@ dependencies = [
     "pydantic-settings>=2.14.1",
 ]
 
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
 [dependency-groups]
 dev = [
     "marimo>=0.23.5",
