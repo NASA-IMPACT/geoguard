@@ -1,3 +1,4 @@
+from geoguard.config import Settings
 from geoguard.pipeline import GeoGuard, PipelineEvent, Report
 from geoguard.rubrics import ClaimRubric, Rubric, Rubricator, RubricItem
 from geoguard.schemas import Input
@@ -11,4 +12,5 @@ __all__ = [
     "Rubric",
     "RubricItem",
     "Rubricator",
+    "Settings",
 ]

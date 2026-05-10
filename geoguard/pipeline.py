@@ -1,9 +1,13 @@
+from __future__ import annotations
+
 import asyncio
 from collections.abc import AsyncIterator
 
 from pydantic import BaseModel, ConfigDict
 
 from geoguard.claims import Claim
+from geoguard.config import Settings
+from geoguard.config import settings as default_settings
 from geoguard.metadata import (
     CLAIM_GROUP_INSTRUCTIONS,
     ClaimGroup,
@@ -43,6 +47,35 @@ class GeoGuard:
         self.tool_selector = tool_selector or ToolSelector()
         self.verifier = verifier or Verifier()
         self.rubricator = rubricator or Rubricator()
+
+    @classmethod
+    def from_config(cls, settings: Settings | None = None) -> GeoGuard:
+        """Build a GeoGuard with every block driven by Settings (env / .env)."""
+        s = settings or default_settings
+        return cls(
+            metadata_extractor=MetadataExtractor(
+                model=s.model,
+                reasoning_effort=s.reasoning_effort,
+                output_type=list[ClaimGroup],
+                max_claims=s.max_claims,
+            ),
+            tool_selector=ToolSelector(
+                model=s.model,
+                reasoning_effort=s.reasoning_effort,
+            ),
+            verifier=Verifier(
+                model=s.model,
+                reasoning_effort=s.reasoning_effort,
+            ),
+            rubricator=Rubricator(
+                model=s.model,
+                reasoning_effort=s.reasoning_effort,
+                questions_per_claim=(
+                    s.questions_per_claim_min,
+                    s.questions_per_claim_max,
+                ),
+            ),
+        )
 
     async def _claim_stream(
         self, claim: Claim, metadata: Metadata
