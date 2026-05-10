@@ -5,7 +5,7 @@ from pydantic import BaseModel, Field
 from pydantic_ai import Agent
 from pydantic_ai.capabilities import Thinking
 
-from .claims import Claim
+from .claims import CLAIM_RULES, DEFAULT_MAX_CLAIMS, Claim
 from .config import ReasoningEffort, settings
 from .schemas import EventType, Input
 
@@ -61,19 +61,38 @@ DEFAULT_INSTRUCTIONS = (
 )
 
 
-CLAIM_GROUP_INSTRUCTIONS = (
-    "Identify each distinct event described in the input. Information that "
-    "shares location, time, and a causal chain describes the SAME event — "
-    "group all such claims under ONE ClaimGroup. Do not create separate "
-    "groups for different aspects of the same event (cause, impact, response).\n\n"
-    "For each event, extract:\n"
-    "1. Structured metadata (event_type, location, time_range, entities, and "
-    "event-specific fields).\n"
-    "2. Atomic, decontextualized claims about it. (See the Claim schema's "
-    "field description for the full decontextualization rule.)\n\n"
-    "Skip opinions, hedges, and meta-commentary. "
-    "Leave any field you cannot confidently extract as None."
-)
+def _group_cap_rule(max_claims: int | None) -> str:
+    if max_claims is None:
+        return (
+            "Across all event groups, extract as many distinct claims as the "
+            "input warrants."
+        )
+    return (
+        f"Across ALL event groups, extract AT MOST {max_claims} claims TOTAL. "
+        f"When the input contains more facts than the cap, prioritize central, "
+        f"load-bearing claims; skip trivia and asides."
+    )
+
+
+def claim_group_instructions(max_claims: int | None = DEFAULT_MAX_CLAIMS) -> str:
+    return (
+        "Identify each distinct event described in the input. Information that "
+        "shares location, time, and a causal chain describes the SAME event — "
+        "group all such claims under ONE ClaimGroup. Do not create separate "
+        "groups for different aspects of the same event (cause, impact, response).\n\n"
+        "For each event, extract:\n"
+        "1. Structured metadata (event_type, location, time_range, entities, "
+        "and event-specific fields).\n"
+        "2. Atomic, decontextualized claims about it.\n\n"
+        + CLAIM_RULES
+        + "\n\nLimits:\n"
+        + _group_cap_rule(max_claims)
+        + "\n\nSkip opinions, hedges, and meta-commentary. "
+        "Leave any metadata field you cannot confidently extract as None."
+    )
+
+
+CLAIM_GROUP_INSTRUCTIONS = claim_group_instructions()
 
 
 class MetadataExtractor:
@@ -83,6 +102,7 @@ class MetadataExtractor:
         reasoning_effort: ReasoningEffort | None = None,
         instructions: str | None = None,
         output_type=list[Metadata],
+        max_claims: int | None = DEFAULT_MAX_CLAIMS,
     ):
         self._agent = Agent(
             model=model or settings.model,
@@ -90,7 +110,12 @@ class MetadataExtractor:
             capabilities=[
                 Thinking(effort=reasoning_effort or settings.reasoning_effort),
             ],
-            instructions=instructions or DEFAULT_INSTRUCTIONS,
+            instructions=instructions
+            or (
+                claim_group_instructions(max_claims)
+                if output_type == list[ClaimGroup]
+                else DEFAULT_INSTRUCTIONS
+            ),
         )
 
     async def __call__(self, inp: Input) -> list[Metadata]:
