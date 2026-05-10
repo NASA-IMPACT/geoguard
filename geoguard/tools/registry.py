@@ -65,15 +65,15 @@ class ToolRegistry:
     def get_candidates(self, event_type: EventType) -> list[Callable]:
         """Candidates for this event type + always-on (OTHER) tools.
 
-        Fallback: if nothing matches, returns ALL registered tools so the
-        agentic selector can pick from the full toolbox.
+        Tools registered under multiple event types appear once. Falls back
+        to ALL registered tools when nothing matches.
         """
         matched = list(self._tools.get(event_type, []))
         if event_type is not EventType.OTHER:
             matched.extend(self._tools.get(EventType.OTHER, []))
-        if matched:
-            return matched
-        return list({fn for tools in self._tools.values() for fn in tools})
+        if not matched:
+            matched = [fn for fns in self._tools.values() for fn in fns]
+        return list({fn.__name__: fn for fn in matched}.values())
 
     def build_toolset(
         self, tools: list[Callable], id: str = "selected"
