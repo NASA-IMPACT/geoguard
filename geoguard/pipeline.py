@@ -10,6 +10,7 @@ from geoguard.metadata import (
     Metadata,
     MetadataExtractor,
 )
+from geoguard.rubrics import Rubric, Rubricator
 from geoguard.schemas import Input
 from geoguard.tools.selector import SelectedTools, ToolSelector
 from geoguard.verifications import Verdict, Verifier, VerifierResult
@@ -20,10 +21,11 @@ class Report(BaseModel):
 
     input: Input
     verifications: list[VerifierResult]
+    rubric: Rubric
     overall_verdict: Verdict
 
 
-PipelineEvent = ClaimGroup | Claim | SelectedTools | VerifierResult | Report
+PipelineEvent = ClaimGroup | Claim | SelectedTools | VerifierResult | Rubric | Report
 
 
 class GeoGuard:
@@ -32,6 +34,7 @@ class GeoGuard:
         metadata_extractor: MetadataExtractor | None = None,
         tool_selector: ToolSelector | None = None,
         verifier: Verifier | None = None,
+        rubricator: Rubricator | None = None,
     ):
         self.metadata_extractor = metadata_extractor or MetadataExtractor(
             output_type=list[ClaimGroup],
@@ -39,6 +42,7 @@ class GeoGuard:
         )
         self.tool_selector = tool_selector or ToolSelector()
         self.verifier = verifier or Verifier()
+        self.rubricator = rubricator or Rubricator()
 
     async def _claim_stream(
         self, claim: Claim, metadata: Metadata
@@ -87,10 +91,14 @@ class GeoGuard:
                 if isinstance(item, VerifierResult):
                     verifications.append(item)
 
+        rubric = await self.rubricator(inp, verifications)
+        yield rubric
+
         overall = _roll_up([v.verification.verdict for v in verifications])
         yield Report(
             input=inp,
             verifications=verifications,
+            rubric=rubric,
             overall_verdict=overall,
         )
 
