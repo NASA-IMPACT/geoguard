@@ -12,7 +12,7 @@ class ToolRegistry:
     """Singleton registry of tools tagged by event type.
 
     Always returns the same instance — `ToolRegistry()` is idempotent.
-    Use `ToolRegistry.reset()` in tests to clear state for isolation.
+    Use `ToolRegistry.clear()` in tests to clear state for isolation.
     """
 
     _instance: ToolRegistry | None = None
@@ -25,8 +25,14 @@ class ToolRegistry:
         return cls._instance
 
     @classmethod
-    def reset(cls) -> None:
-        cls._instance = None
+    def clear(cls) -> None:
+        """Empty the singleton's tools in place — for test isolation.
+
+        Does not swap the instance, so any module that imported the
+        module-level `registry` binding stays correctly wired after a clear.
+        """
+        if cls._instance is not None:
+            cls._instance._tools.clear()
 
     def register(self, *event_types: EventType):
         """Decorator: register a tool callable under one or more event types.
