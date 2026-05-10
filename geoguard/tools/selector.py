@@ -1,4 +1,5 @@
 import inspect
+from dataclasses import dataclass
 from typing import Callable
 
 from pydantic import BaseModel
@@ -13,6 +14,12 @@ from geoguard.tools.registry import registry
 
 class ToolSelection(BaseModel):
     chosen: list[str]
+    reasoning: str | None = None
+
+
+@dataclass
+class SelectedTools:
+    tools: list[Callable]
     reasoning: str | None = None
 
 
@@ -56,10 +63,10 @@ class ToolSelector:
 
     async def __call__(
         self, claim: Claim, metadata: Metadata, **run_kwargs
-    ) -> list[Callable]:
+    ) -> SelectedTools:
         candidates = registry.get_candidates(metadata.event_type)
         if not candidates:
-            return []
+            return SelectedTools(tools=[])
         descriptions = "\n".join(_describe_tool(c) for c in candidates)
         prompt = (
             f"Claim: {claim.claim}\n\n"
@@ -68,4 +75,7 @@ class ToolSelector:
         )
         result = await self._agent.run(prompt, **run_kwargs)
         chosen = set(result.output.chosen)
-        return [c for c in candidates if c.__name__ in chosen]
+        return SelectedTools(
+            tools=[c for c in candidates if c.__name__ in chosen],
+            reasoning=result.output.reasoning,
+        )
