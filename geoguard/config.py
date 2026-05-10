@@ -12,8 +12,17 @@ class Settings(BaseSettings):
         extra="ignore",
     )
 
+    # LLM defaults — used by every block when its `model` / `reasoning_effort`
+    # constructor params are None.
     model: str = "openai:gpt-5.2"
     reasoning_effort: ReasoningEffort = "medium"
+
+    # Claim extraction — applied by GeoGuard.from_config().
+    max_claims: int | None = 15
+
+    # Rubric — applied by GeoGuard.from_config().
+    questions_per_claim_min: int = 5
+    questions_per_claim_max: int = 10
 
 
 settings = Settings()
