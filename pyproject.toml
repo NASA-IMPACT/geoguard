@@ -1,8 +1,10 @@
 [project]
 name = "geoguard"
 version = "0.1.0"
-description = "Add your description here"
+description = "Pluggable guardrail framework for geospatial AI."
 readme = "README.md"
+license = "Apache-2.0"
+license-files = ["LICENSE"]
 requires-python = ">=3.12"
 dependencies = [
     "marimo>=0.23.5",
