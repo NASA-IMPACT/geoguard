@@ -51,8 +51,10 @@ class ToolRegistry:
 
         def deco(fn):
             for et in event_types:
-                if fn not in self._tools[et]:
-                    self._tools[et].append(fn)
+                self._tools[et] = [
+                    t for t in self._tools[et] if t.__name__ != fn.__name__
+                ]
+                self._tools[et].append(fn)
             return fn
 
         return deco
