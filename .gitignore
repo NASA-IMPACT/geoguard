@@ -238,3 +238,8 @@ temp/
 *.tiff
 *.ico
 *.txt
+
+# Local agent / IDE state
+.agents/
+.claude/
+skills-lock.json
