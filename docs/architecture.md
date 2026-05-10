@@ -4,7 +4,7 @@
 
 A pluggable **guardrail layer** for geo-AI. Any upstream system that emits geographically-grounded text (foundation-model inference, agentic workflows, hand-authored copy) can be wrapped so its factual claims are verified against external geospatial data sources before reaching a downstream consumer.
 
-The framework decomposes the upstream's output into atomic claims, fetches authoritative evidence via registered tools, and emits a structured report with verdicts, evidence, and rationale per claim.
+The framework decomposes the upstream's output into atomic claims, fetches authoritative evidence via registered tools, scores the verification with a holistic rubric, and emits a structured report with verdicts, evidence, rationale, and confidence per claim.
 
 ---
 
@@ -21,10 +21,10 @@ GeoGuard lives between an upstream producer and its downstream consumer:
                                 │  (text ± images)
                                 ▼
                   ┌──────────────────────────┐
-                  │        geoguard          │ ← decompose → verify → report
+                  │        geoguard          │ ← decompose → verify → score → report
                   └─────────────┬────────────┘
                                 │  Report
-                                │  (verdicts + evidence + rationale)
+                                │  (verdicts + evidence + rubric + confidence)
                                 ▼
                   ┌──────────────────────────┐
                   │   downstream consumer    │ ← gate / retry / surface / log
@@ -40,7 +40,7 @@ Same shape for any producer:
 | human-authored copy     | → output → | geoguard | → Report → consumer
 ```
 
-The guardrail is **format-agnostic on the way in** (just text/images) and **structured on the way out** (typed `Report` with discriminated verdicts) — so any consumer can decide whether to gate, retry, surface, or log based on the verification result.
+The guardrail is **format-agnostic on the way in** (just text/images) and **structured on the way out** (typed `Report` with discriminated verdicts + a confidence score) — so any consumer can decide whether to gate, retry, surface, or log based on the verification result.
 
 ---
 
@@ -60,7 +60,8 @@ The guardrail is **format-agnostic on the way in** (just text/images) and **stru
                                │  each = { metadata, list[Claim] }
                                ▼
                     ╭══════════════════════════════════════╮
-                    ║          for each claim:             ║
+                    ║       for each claim:                ║
+                    ║       (parallel within group)        ║
                     ║                                      ║
                     ║          ┌──────────────────┐        ║
                     ║          │  ToolSelector    │ ← LLM  ║
@@ -80,20 +81,26 @@ The guardrail is **format-agnostic on the way in** (just text/images) and **stru
                     ║                   │ { verification,  ║
                     ║                   │   tool_calls }   ║
                     ╰══════════════════ │ ═════════════════╯
-                                        │
+                                        │ list[VerifierResult]
                                         ▼
                               ┌──────────────────┐
-                              │   Aggregator     │  pure rules:
-                              │  (roll up        │  any CONTRADICTS → CONTRADICTS
-                              │   verdicts)      │  all SUPPORTS    → SUPPORTS
-                              └────────┬─────────┘  else            → INCONCLUSIVE
-                                       │
+                              │   Rubricator     │ ← LLM (1 holistic call)
+                              │  (input + all    │
+                              │   verifications  │
+                              │   → yes/no       │
+                              │   questions per  │
+                              │   claim)         │
+                              └────────┬─────────┘
+                                       │ Rubric
+                                       │ { per_claim: [{claim, items, score}],
+                                       │   confidence (mean of scores) }
                                        ▼
                               ┌──────────────────┐
                               │     Report       │
                               │ { input,         │
                               │   verifications, │
-                              │   overall }      │
+                              │   rubric,        │
+                              │   overall_verdict}
                               └────────┬─────────┘
                                        │
                                        ▼
@@ -105,22 +112,27 @@ The guardrail is **format-agnostic on the way in** (just text/images) and **stru
 | `MetadataExtractor` | Extracts claims + classifies event type + fills metadata in one structured call (via `output_type=list[ClaimGroup]`) | Yes |
 | `ToolSelector` | Pre-filters tools via registry; LLM picks the relevant subset given the claim + metadata | Yes |
 | `Verifier` | Per-claim agent with the selected tools attached; agent calls tools, synthesises verdict + rationale | Yes |
-| Aggregator | Roll-up of per-claim verdicts | No |
+| `Rubricator` | One holistic call after all claims are verified; reads original input + every claim's verification + tool_calls; produces dynamic yes/no rubric items per claim with overall confidence | Yes |
+
+The `overall_verdict` rollup (any CONTRADICTS → CONTRADICTS; all SUPPORTS → SUPPORTS; else INCONCLUSIVE) is a pure-rules helper inside `pipeline.py` — small enough to live with the `Report` construction rather than a standalone block.
 
 ---
 
 ## Streaming events
 
-`GeoGuard.__call__` is an async generator. Each block step yields a typed event so a UI can react in real time:
+`GeoGuard.stream()` (also reachable via `__call__`) is an async generator. Each block step yields a typed event so a UI can react in real time. Per-claim work runs in parallel within a group; cross-claim events interleave by completion time, while within a single claim the order `Claim → SelectedTools → VerifierResult` is preserved.
 
 ```
 ClaimGroup ──┐
              ├── Claim ──── SelectedTools ──── VerifierResult
-             ├── Claim ──── SelectedTools ──── VerifierResult
-             └── Claim ──── SelectedTools ──── VerifierResult
-                                                      │
-                                                      ▼
-                                                    Report   (terminal)
+             ├── Claim ──── SelectedTools ──── VerifierResult     (parallel,
+             └── Claim ──── SelectedTools ──── VerifierResult      interleaved)
+                                                       │
+                                                       ▼
+                                                   Rubric    (holistic, after
+                                                       │      all claims done)
+                                                       ▼
+                                                   Report    (terminal)
 ```
 
 Consumers `isinstance`-dispatch on the event type. `GeoGuard.run(input)` is a convenience that drains the stream and returns just the final `Report`.
@@ -158,13 +170,47 @@ Pydantic-ai compatibility activates at agent-attachment time (in the verifier), 
 
 ---
 
+## Claim extraction rules
+
+Both `ClaimExtractor` and `MetadataExtractor` (in `list[ClaimGroup]` mode) compose the same `CLAIM_RULES` constant from `claims.py`. Single source of truth for what a claim must satisfy:
+
+- **ATOMIC**: one factual assertion per claim
+- **DECONTEXTUALIZED**: include all proper nouns, absolute dates, explicit locations; no pronouns / deictic references that need surrounding context
+- **DISTINCT**: no claim may overlap with or be a sub-statement of another; merge overlapping facts into one comprehensive claim
+- **FAITHFUL**: every fact must be explicitly stated in the input (combining facts from different parts of the input is allowed; adding, inferring, or pulling from prior knowledge is not)
+- **VERIFIABLE**: checkable against an external source
+
+Both extractors also accept a `max_claims: int | None = 15` cap. When set, the prompt instructs the agent to prioritize central, load-bearing claims and skip trivia. Pass `None` for no cap.
+
+---
+
+## Rubric design
+
+The Rubricator is the framework's confidence layer. After every claim has been verified, one LLM call ingests:
+- the original `Input.text`
+- every `VerifierResult` (claim, verdict, rationale, full tool-call trace)
+
+…and produces a `Rubric` that contains, **per claim**, between 5 and 10 dynamically-generated yes/no questions, each answered using the evidence already gathered (no new tool calls). Per-claim score = ratio of yes-answers; overall confidence = mean of per-claim scores.
+
+Five prompt-level constraints reduce hallucination:
+
+1. **Distinct within a claim**: no near-duplicate questions inside one rubric
+2. **Specific across claims**: each claim's questions target its unique verifiable details, not a generic checklist
+3. **Mandatory citation**: every `answer=true` must reference a specific `tool_call` result in its `reasoning`
+4. **Conservative-no default**: when evidence is ambiguous, answer `false` (safer for a guardrail)
+5. **Tunable cap**: `questions_per_claim: tuple[int, int] = (5, 10)` controls budget; range is a soft target
+
+The rubric questions are generated **dynamically per claim** — no hardcoded templates. Each claim's content drives what to check.
+
+---
+
 ## Core data types
 
 | Type | Shape | Defined in |
 |---|---|---|
 | `Input` | `text: str`, `images: list[ImageRef]` | `schemas.py` |
 | `EventType` | `FLOOD`, `OTHER` (StrEnum) | `schemas.py` |
-| `Claim` | `claim: str` (atomic, decontextualized) | `claims.py` |
+| `Claim` | `claim: str` (atomic, decontextualized, faithful) | `claims.py` |
 | `GeneralMetadata` | base + `OTHER` fallback variant | `metadata.py` |
 | `FloodMetadata` | extends `GeneralMetadata`, adds flood-specific fields | `metadata.py` |
 | `Metadata` | discriminated union over the variants | `metadata.py` |
@@ -174,8 +220,11 @@ Pydantic-ai compatibility activates at agent-attachment time (in the verifier), 
 | `ClaimVerification` | `claim`, `metadata`, `verdict`, `rationale` | `verifications.py` |
 | `ToolCall` | `name`, `args` (JSON str), `result` | `verifications.py` |
 | `VerifierResult` | `verification: ClaimVerification`, `tool_calls: list[ToolCall]` | `verifications.py` |
-| `Report` | `input`, `verifications`, `overall_verdict` | `pipeline.py` |
-| `PipelineEvent` | `ClaimGroup \| Claim \| SelectedTools \| VerifierResult \| Report` | `pipeline.py` |
+| `RubricItem` | `question: str`, `answer: bool`, `reasoning: str` | `rubrics.py` |
+| `ClaimRubric` | `claim: Claim`, `items: list[RubricItem]`, `.score` property | `rubrics.py` |
+| `Rubric` | `per_claim: list[ClaimRubric]`, `.confidence` property | `rubrics.py` |
+| `Report` | `input`, `verifications`, `rubric`, `overall_verdict` | `pipeline.py` |
+| `PipelineEvent` | `ClaimGroup \| Claim \| SelectedTools \| VerifierResult \| Rubric \| Report` | `pipeline.py` |
 
 ---
 
@@ -185,5 +234,7 @@ Pydantic-ai compatibility activates at agent-attachment time (in the verifier), 
 |---|---|
 | A new tool | `@registry(EventType.X) async def my_tool(...): ...` — see `tools/` |
 | A new event type | Add value to `EventType` enum (`schemas.py`), add a metadata subclass (e.g., `BurnMetadata`) extending `GeneralMetadata`, add it to the `Metadata` discriminated union |
-| Custom selector / verifier | Replace via constructor injection: `GeoGuard(verifier=MyVerifier())` |
+| Custom block (selector / verifier / rubricator / metadata extractor) | Replace via constructor injection: `GeoGuard(verifier=MyVerifier())`, `GeoGuard(rubricator=MyRubricator())`, etc. |
 | Custom output schema for any block | Pass `output_type=...` to the block's constructor — `MetadataExtractor` is generic over the structured output type |
+| Tighter / looser claim caps | `MetadataExtractor(max_claims=N)` or `max_claims=None` for no cap |
+| More / fewer rubric questions | `Rubricator(questions_per_claim=(low, high))` |
