@@ -21,6 +21,7 @@ class ToolSelection(BaseModel):
 class SelectedTools:
     tools: list[Callable]
     reasoning: str | None = None
+    claim: Claim | None = None
 
 
 DEFAULT_INSTRUCTIONS = (
@@ -66,7 +67,7 @@ class ToolSelector:
     ) -> SelectedTools:
         candidates = registry.get_candidates(metadata.event_type)
         if not candidates:
-            return SelectedTools(tools=[])
+            return SelectedTools(tools=[], claim=claim)
         descriptions = "\n".join(_describe_tool(c) for c in candidates)
         prompt = (
             f"Claim: {claim.claim}\n\n"
@@ -78,4 +79,5 @@ class ToolSelector:
         return SelectedTools(
             tools=[c for c in candidates if c.__name__ in chosen],
             reasoning=result.output.reasoning,
+            claim=claim,
         )
