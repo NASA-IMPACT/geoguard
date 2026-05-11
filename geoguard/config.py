@@ -24,5 +24,8 @@ class Settings(BaseSettings):
     questions_per_claim_min: int = 5
     questions_per_claim_max: int = 10
 
+    # HTTP timeout (seconds) — used by tools that make external API calls.
+    http_timeout_seconds: float = 30.0
+
 
 settings = Settings()

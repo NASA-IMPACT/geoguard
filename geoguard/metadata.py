@@ -61,7 +61,7 @@ async def geocode(name: str) -> dict:
     lon (float or None), display_name (str).
     """
     async with Photon(adapter_factory=AioHTTPAdapter) as geocoder:
-        loc = await geocoder.geocode(name, timeout=10)
+        loc = await geocoder.geocode(name, timeout=settings.http_timeout_seconds)
     if loc is None:
         return {"found": False, "lat": None, "lon": None, "display_name": name}
     return {
