@@ -1,6 +1,9 @@
+from collections.abc import Awaitable, Callable
 from datetime import datetime
 from typing import Annotated, Literal
 
+from geopy.adapters import AioHTTPAdapter
+from geopy.geocoders import Photon
 from pydantic import BaseModel, Field
 from pydantic_ai import Agent
 from pydantic_ai.capabilities import Thinking
@@ -51,13 +54,43 @@ class ClaimGroup(BaseModel):
     claims: list[Claim]
 
 
+async def geocode(name: str) -> dict:
+    """Resolve a place name to coordinates via OpenStreetMap (Photon endpoint).
+
+    Returns a dict with keys: found (bool), lat (float or None),
+    lon (float or None), display_name (str).
+    """
+    async with Photon(adapter_factory=AioHTTPAdapter) as geocoder:
+        loc = await geocoder.geocode(name, timeout=10)
+    if loc is None:
+        return {"found": False, "lat": None, "lon": None, "display_name": name}
+    return {
+        "found": True,
+        "lat": loc.latitude,
+        "lon": loc.longitude,
+        "display_name": loc.address,
+    }
+
+
+GEOCODE_RULE = (
+    "For any GeoLocation, lat and lon MUST come from the `geocode` tool. "
+    "Never produce coordinates from prior knowledge. Call `geocode` once "
+    "per distinct place name in the input. When calling `geocode`, pass "
+    "the FULLEST place name available from the input — include state, "
+    "country, or region whenever the input provides them (e.g., call "
+    "`geocode('Galveston, Texas, USA')` not `geocode('Galveston')`) to "
+    "avoid resolving to a wrong same-named place. If `geocode` returns "
+    "`found: false`, leave lat and lon as None on that GeoLocation."
+)
+
+
 DEFAULT_INSTRUCTIONS = (
     "Extract structured geospatial metadata from the input. "
     "Identify each distinct event described in the input and return one entry "
     "per event. For each, classify the event_type (flood or other) and fill in "
     "the fields relevant to that event type. Use 'other' with only the base "
     "fields when you cannot confidently classify the event. "
-    "Leave any field you cannot confidently extract as None."
+    "Leave any field you cannot confidently extract as None.\n\n" + GEOCODE_RULE
 )
 
 
@@ -87,6 +120,8 @@ def claim_group_instructions(max_claims: int | None = DEFAULT_MAX_CLAIMS) -> str
         + CLAIM_RULES
         + "\n\nLimits:\n"
         + _group_cap_rule(max_claims)
+        + "\n\n"
+        + GEOCODE_RULE
         + "\n\nSkip opinions, hedges, and meta-commentary. "
         "Leave any metadata field you cannot confidently extract as None."
     )
@@ -103,10 +138,12 @@ class MetadataExtractor:
         instructions: str | None = None,
         output_type=list[Metadata],
         max_claims: int | None = DEFAULT_MAX_CLAIMS,
+        geocoder: Callable[[str], Awaitable[dict]] = geocode,
     ):
         self._agent = Agent(
             model=model or settings.model,
             output_type=output_type,
+            tools=[geocoder],
             capabilities=[
                 Thinking(effort=reasoning_effort or settings.reasoning_effort),
             ],
