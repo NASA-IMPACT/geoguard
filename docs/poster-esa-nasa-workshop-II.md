@@ -1,4 +1,4 @@
-# GeoGuard — A Guardrails Framework for Geospatial Foundation Models
+# GeoGuard: An Agentic Guardrails & Validation Framework for Geospatial AI
 
 *ESA – NASA 2026 Workshop · Poster Session*
 
