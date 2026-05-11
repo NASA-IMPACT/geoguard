@@ -43,6 +43,7 @@ GEOGUARD_REASONING_EFFORT=medium          # minimal | low | medium | high
 GEOGUARD_MAX_CLAIMS=15
 GEOGUARD_QUESTIONS_PER_CLAIM_MIN=5
 GEOGUARD_QUESTIONS_PER_CLAIM_MAX=10
+GEOGUARD_HTTP_TIMEOUT_SECONDS=30
 ```
 
 `GeoGuard.from_config()` instantiates the pipeline with these settings.
