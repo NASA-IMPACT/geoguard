@@ -6,7 +6,7 @@ from geoguard.schemas import EventType
 from geoguard.tools.registry import registry
 
 
-@registry(EventType.FLOOD)
+@registry(EventType.FLOOD, EventType.STORM)
 async def get_elevation(lat: float, lon: float) -> dict:
     """Look up elevation in meters above sea level at the given coordinates.
 
@@ -30,7 +30,7 @@ async def get_elevation(lat: float, lon: float) -> dict:
     }
 
 
-@registry(EventType.FLOOD)
+@registry(EventType.FLOOD, EventType.STORM)
 async def find_nearest_water_body(
     lat: float,
     lon: float,
