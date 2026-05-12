@@ -1,10 +1,12 @@
+import re
+from calendar import monthrange
 from collections.abc import Awaitable, Callable
 from datetime import datetime
 from typing import Annotated, Literal
 
 from geopy.adapters import AioHTTPAdapter
 from geopy.geocoders import Photon
-from pydantic import BaseModel, Field, computed_field
+from pydantic import BaseModel, Field, computed_field, model_validator
 from pydantic_ai import Agent
 from pydantic_ai.capabilities import Thinking
 
@@ -22,6 +24,32 @@ class GeoLocation(BaseModel):
 class TimeRange(BaseModel):
     start: datetime | None = None
     end: datetime | None = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def expand_partial_dates(cls, data):
+        """Expand year-only and year-month strings to full ISO dates.
+
+        Pydantic's datetime parser rejects "2019-06" and silently misreads
+        "2015" as a Unix timestamp (→ 1970). We pre-normalize so the LLM
+        can output its most precise honest form without triggering either.
+        """
+        if not isinstance(data, dict):
+            return data
+        for key in ("start", "end"):
+            v = data.get(key)
+            if not isinstance(v, str):
+                continue
+            if re.fullmatch(r"\d{4}", v):  # YYYY → year bounds
+                data[key] = f"{v}-01-01" if key == "start" else f"{v}-12-31"
+            elif re.fullmatch(r"\d{4}-\d{2}", v):  # YYYY-MM → month bounds
+                year, month = int(v[:4]), int(v[5:7])
+                if key == "start":
+                    data[key] = f"{v}-01"
+                else:
+                    last_day = monthrange(year, month)[1]
+                    data[key] = f"{v}-{last_day:02d}"
+        return data
 
     @computed_field
     @property
