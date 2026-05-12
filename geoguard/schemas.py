@@ -5,6 +5,7 @@ from pydantic import BaseModel
 
 class EventType(StrEnum):
     FLOOD = "flood"
+    STORM = "storm"
     OTHER = "other"
 
 

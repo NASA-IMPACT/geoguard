@@ -78,8 +78,15 @@ class FloodMetadata(GeneralMetadata):
     river_basin: str | None = None
 
 
+class StormMetadata(GeneralMetadata):
+    event_type: Literal[EventType.STORM] = EventType.STORM
+    storm_name: str | None = None
+    sustained_wind_speed_kmh: float | None = None
+    peak_gust_kmh: float | None = None
+
+
 Metadata = Annotated[
-    FloodMetadata | GeneralMetadata,
+    FloodMetadata | StormMetadata | GeneralMetadata,
     Field(discriminator="event_type"),
 ]
 
@@ -129,9 +136,11 @@ TIME_RULE = (
 DEFAULT_INSTRUCTIONS = (
     "Extract structured geospatial metadata from the input. "
     "Identify each distinct event described in the input and return one entry "
-    "per event. For each, classify the event_type (flood or other) and fill in "
-    "the fields relevant to that event type. Use 'other' with only the base "
-    "fields when you cannot confidently classify the event. "
+    "per event. For each, classify the event_type (flood, storm, or other) "
+    "and fill in the fields relevant to that event type. Use 'storm' for "
+    "hurricanes, cyclones, tropical storms, and similar atmospheric events. "
+    "Use 'other' with only the base fields when you cannot confidently "
+    "classify the event. "
     "Leave any field you cannot confidently extract as None.\n\n"
     + GEOCODE_RULE
     + "\n\n"

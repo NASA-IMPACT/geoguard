@@ -5,7 +5,7 @@ from geoguard.schemas import EventType
 from geoguard.tools.registry import registry
 
 
-@registry(EventType.FLOOD)
+@registry(EventType.FLOOD, EventType.STORM)
 async def get_historical_precipitation(
     lat: float,
     lon: float,
@@ -66,7 +66,7 @@ async def get_historical_precipitation(
     }
 
 
-@registry(EventType.FLOOD)
+@registry(EventType.FLOOD, EventType.STORM)
 async def get_historical_winds(
     lat: float,
     lon: float,
