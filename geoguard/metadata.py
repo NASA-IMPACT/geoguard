@@ -4,7 +4,7 @@ from typing import Annotated, Literal
 
 from geopy.adapters import AioHTTPAdapter
 from geopy.geocoders import Photon
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, computed_field
 from pydantic_ai import Agent
 from pydantic_ai.capabilities import Thinking
 
@@ -22,6 +22,13 @@ class GeoLocation(BaseModel):
 class TimeRange(BaseModel):
     start: datetime | None = None
     end: datetime | None = None
+
+    @computed_field
+    @property
+    def duration_days(self) -> float | None:
+        if self.start is None or self.end is None:
+            return None
+        return (self.end - self.start).total_seconds() / 86400.0
 
 
 class Entity(BaseModel):
