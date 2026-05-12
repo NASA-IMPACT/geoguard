@@ -84,13 +84,23 @@ GEOCODE_RULE = (
 )
 
 
+TIME_RULE = (
+    "When the input states a date for an event, EVERY entry describing "
+    "that event MUST set time_range. Never leave time_range null on a "
+    "related entry when the date is in the input."
+)
+
+
 DEFAULT_INSTRUCTIONS = (
     "Extract structured geospatial metadata from the input. "
     "Identify each distinct event described in the input and return one entry "
     "per event. For each, classify the event_type (flood or other) and fill in "
     "the fields relevant to that event type. Use 'other' with only the base "
     "fields when you cannot confidently classify the event. "
-    "Leave any field you cannot confidently extract as None.\n\n" + GEOCODE_RULE
+    "Leave any field you cannot confidently extract as None.\n\n"
+    + GEOCODE_RULE
+    + "\n\n"
+    + TIME_RULE
 )
 
 
@@ -122,6 +132,8 @@ def claim_group_instructions(max_claims: int | None = DEFAULT_MAX_CLAIMS) -> str
         + _group_cap_rule(max_claims)
         + "\n\n"
         + GEOCODE_RULE
+        + "\n\n"
+        + TIME_RULE
         + "\n\nSkip opinions, hedges, and meta-commentary. "
         "Leave any metadata field you cannot confidently extract as None."
     )
