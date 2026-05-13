@@ -2,9 +2,21 @@
 
 import functools
 from collections.abc import Awaitable, Callable
+from datetime import date, timedelta
 from typing import Any
 
 import httpx
+
+
+def date_range(start: str | date, end: str | date) -> list[date]:
+    """Inclusive list of dates between start and end.
+
+    Accepts ISO strings (YYYY-MM-DD) or `date` objects for either bound.
+    Returns an empty list if `end` is before `start`.
+    """
+    s = date.fromisoformat(start) if isinstance(start, str) else start
+    e = date.fromisoformat(end) if isinstance(end, str) else end
+    return [s + timedelta(days=i) for i in range((e - s).days + 1)]
 
 
 def graceful_http(fn: Callable[..., Awaitable[dict]]) -> Callable[..., Awaitable[dict]]:
