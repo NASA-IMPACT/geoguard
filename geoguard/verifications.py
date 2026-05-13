@@ -6,6 +6,7 @@ from pydantic import BaseModel
 from pydantic_ai import Agent
 from pydantic_ai.capabilities import Thinking
 from pydantic_ai.messages import ToolCallPart, ToolReturnPart
+from pydantic_ai.usage import UsageLimits
 
 from geoguard.claims import Claim
 from geoguard.config import ReasoningEffort, settings
@@ -75,11 +76,17 @@ class Verifier:
         model: str | None = None,
         reasoning_effort: ReasoningEffort | None = None,
         instructions: str | None = None,
+        tool_calls_limit: int | None = None,
         **agent_kwargs,
     ):
         self._model = model or settings.model
         self._reasoning_effort = reasoning_effort or settings.reasoning_effort
         self._instructions = instructions or DEFAULT_INSTRUCTIONS
+        self._tool_calls_limit = (
+            tool_calls_limit
+            if tool_calls_limit is not None
+            else settings.verification_tool_usage_limit
+        )
         self._agent_kwargs = agent_kwargs
 
     async def __call__(
@@ -99,7 +106,11 @@ class Verifier:
             **self._agent_kwargs,
         )
         prompt = f"Claim: {claim.claim}\n\nMetadata: {metadata.model_dump_json()}"
-        result = await agent.run(prompt, **run_kwargs)
+        result = await agent.run(
+            prompt,
+            usage_limits=UsageLimits(tool_calls_limit=self._tool_calls_limit),
+            **run_kwargs,
+        )
         return VerifierResult(
             verification=result.output,
             tool_calls=_extract_tool_calls(result.all_messages()),

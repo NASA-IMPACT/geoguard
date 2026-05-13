@@ -27,5 +27,9 @@ class Settings(BaseSettings):
     # HTTP timeout (seconds) — used by tools that make external API calls.
     http_timeout_seconds: float = 30.0
 
+    # Max tool calls per claim verification — caps the verifier agent's
+    # tool-use budget so it commits to a verdict rather than over-sampling.
+    verification_tool_usage_limit: int = 7
+
 
 settings = Settings()
