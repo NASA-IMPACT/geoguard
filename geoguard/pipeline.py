@@ -66,6 +66,7 @@ class GeoGuard:
             verifier=Verifier(
                 model=s.model,
                 reasoning_effort=s.reasoning_effort,
+                tool_calls_limit=s.verification_tool_usage_limit,
             ),
             rubricator=Rubricator(
                 model=s.model,
