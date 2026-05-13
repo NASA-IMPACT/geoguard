@@ -1,6 +1,8 @@
 import asyncio
+import math
 
 import httpx
+from geopy.distance import geodesic
 
 from geoguard.config import settings
 from geoguard.schemas import EventType
@@ -244,4 +246,260 @@ async def get_radar_gauge_precipitation(
         "start_date": start_date,
         "end_date": end,
         "source": "Iowa Environmental Mesonet IEMRE (NOAA PRISM + MRMS)",
+    }
+
+
+@registry(EventType.FLOOD, EventType.STORM)
+@graceful_http
+async def get_streamflow_history(
+    lat: float,
+    lon: float,
+    start_date: str,
+    end_date: str | None = None,
+    search_radius_km: float = 30.0,
+    max_gauges: int = 5,
+) -> dict:
+    """Daily streamflow at nearby USGS river gauges (US only).
+
+    Source: USGS Water Services NWIS — daily mean discharge plus the
+    period-of-record annual peak history. Use for verifying river-stage,
+    river-flooding, and 'record flooding' claims, and for distinguishing
+    overland flooding (follows rainfall within hours) from river flooding
+    (can persist days after rain stops). Outside the US returns found=False.
+
+    For each gauge within `search_radius_km` of the point (capped at
+    `max_gauges`, nearest first), returns the daily mean discharge series
+    plus the all-time annual peak record and the rank of any annual peak
+    that occurred during the queried window. event_rank=1 means the event
+    set a new all-time record; event_rank=2 means second-highest; None
+    means no annual peak was recorded in this window.
+
+    Note on units: USGS reports streamflow in cubic feet per second (cfs),
+    which is the convention in US flood narratives. m³/s is provided in
+    parallel for metric audiences (1 cfs = 0.02831685 m³/s).
+
+    Note on peaks vs daily means: USGS annual peaks are *instantaneous*
+    maxima, typically higher than the daily mean of the same day. Compare
+    daily series across days; compare annual peak record to the event's
+    annual peak entry (not to the daily mean).
+
+    Args:
+        start_date: Start of inclusive range (YYYY-MM-DD).
+        end_date: End of inclusive range (YYYY-MM-DD). None → single day.
+        search_radius_km: Radius around (lat, lon) to search for gauges.
+        max_gauges: Cap on returned gauges to limit response size.
+
+    Returns: dict with keys:
+        found: True if at least one gauge was located, False otherwise.
+        reason: Short explanation when found=False (else absent).
+        dates: ISO date strings, one per day.
+        gauges: list of per-gauge dicts (nearest first):
+            site_no: USGS site number.
+            name: Gauge station name.
+            distance_km: Distance from query point.
+            daily_cfs: Daily mean discharge in cfs (None on missing).
+            daily_m3s: Same series converted to m³/s.
+            event_peak_cfs: Instantaneous annual peak that occurred in the
+                window (None if no annual peak was recorded that period).
+            event_peak_date: ISO date of event_peak_cfs.
+            all_time_record_cfs: Highest annual peak in the gauge's record.
+            all_time_record_date: ISO date of all_time_record_cfs.
+            peaks_years_on_record: Count of annual peaks on file.
+            event_rank: Rank of event_peak_cfs among all annual peaks
+                (1 = new record, 2 = second-highest, etc.; None if no
+                event peak).
+        lat, lon, start_date, end_date: Query echo.
+        source: Identifier of the data source.
+    """
+    end = end_date or start_date
+    dates = date_range(start_date, end)
+    iso_dates = [d.isoformat() for d in dates]
+
+    deg_lat = search_radius_km / 111.32
+    deg_lon = search_radius_km / (111.32 * max(math.cos(math.radians(lat)), 0.01))
+    bbox = (
+        f"{lon - deg_lon:.5f},{lat - deg_lat:.5f},"
+        f"{lon + deg_lon:.5f},{lat + deg_lat:.5f}"
+    )
+
+    site_url = "https://waterservices.usgs.gov/nwis/site/"
+    dv_url = "https://waterservices.usgs.gov/nwis/dv/"
+    peak_url = "https://nwis.waterdata.usgs.gov/nwis/peak"
+
+    async with httpx.AsyncClient(timeout=settings.http_timeout_seconds) as c:
+        r_sites = await c.get(
+            site_url,
+            params={
+                "format": "rdb",
+                "bBox": bbox,
+                "parameterCd": "00060",
+                "siteStatus": "active",
+                "hasDataTypeCd": "dv",
+            },
+        )
+        if r_sites.status_code == 404:
+            return {
+                "found": False,
+                "reason": (
+                    f"USGS has no active streamflow gauges in the search "
+                    f"bbox around ({lat}, {lon}) — likely outside US "
+                    f"coverage."
+                ),
+                "lat": lat,
+                "lon": lon,
+                "start_date": start_date,
+                "end_date": end,
+            }
+        r_sites.raise_for_status()
+
+        header: list[str] | None = None
+        candidates: list[dict] = []
+        for line in r_sites.text.splitlines():
+            if not line or line.startswith("#"):
+                continue
+            cols = line.split("\t")
+            if header is None:
+                header = cols
+                continue
+            if cols[0] == "5s":  # RDB column-spec row
+                continue
+            if len(cols) < len(header):
+                continue
+            row = dict(zip(header, cols))
+            try:
+                site_lat = float(row["dec_lat_va"])
+                site_lon = float(row["dec_long_va"])
+            except (KeyError, ValueError):
+                continue
+            dist_km = geodesic((lat, lon), (site_lat, site_lon)).kilometers
+            if dist_km <= search_radius_km:
+                candidates.append(
+                    {
+                        "site_no": row["site_no"],
+                        "name": row["station_nm"],
+                        "distance_km": round(dist_km, 2),
+                    }
+                )
+
+        candidates.sort(key=lambda g: g["distance_km"])
+        candidates = candidates[:max_gauges]
+
+        if not candidates:
+            return {
+                "found": False,
+                "reason": (
+                    f"No active USGS streamflow gauges within "
+                    f"{search_radius_km} km (likely outside US or no "
+                    f"nearby gauges)."
+                ),
+                "lat": lat,
+                "lon": lon,
+                "start_date": start_date,
+                "end_date": end,
+            }
+
+        site_ids = ",".join(g["site_no"] for g in candidates)
+        r_dv = await c.get(
+            dv_url,
+            params={
+                "format": "json",
+                "sites": site_ids,
+                "parameterCd": "00060",
+                "statCd": "00003",
+                "startDT": iso_dates[0],
+                "endDT": iso_dates[-1],
+            },
+        )
+        r_dv.raise_for_status()
+        dv_data = r_dv.json()
+
+        dv_by_site: dict[str, dict[str, float | None]] = {}
+        for ts in dv_data.get("value", {}).get("timeSeries", []):
+            sid = ts["sourceInfo"]["siteCode"][0]["value"]
+            site_dv: dict[str, float | None] = {}
+            for v in ts.get("values", [{}])[0].get("value", []):
+                d = v["dateTime"][:10]
+                try:
+                    site_dv[d] = float(v["value"])
+                except (TypeError, ValueError):
+                    site_dv[d] = None
+            dv_by_site[sid] = site_dv
+
+        peak_responses = await asyncio.gather(
+            *(
+                c.get(
+                    peak_url,
+                    params={
+                        "site_no": g["site_no"],
+                        "format": "rdb",
+                        "agency_cd": "USGS",
+                    },
+                )
+                for g in candidates
+            ),
+            return_exceptions=True,
+        )
+
+    cfs_to_m3s = 0.02831685
+    gauges_out: list[dict] = []
+    for g, peak_resp in zip(candidates, peak_responses):
+        sid = g["site_no"]
+        site_dv = dv_by_site.get(sid, {})
+        daily_cfs = [site_dv.get(d) for d in iso_dates]
+        daily_m3s = [
+            round(v * cfs_to_m3s, 2) if v is not None else None for v in daily_cfs
+        ]
+
+        peaks: list[tuple[str, float]] = []
+        if not isinstance(peak_resp, Exception):
+            for line in peak_resp.text.splitlines():
+                if not line.startswith("USGS"):
+                    continue
+                cols = line.split("\t")
+                if len(cols) <= 4 or not cols[4] or len(cols[2]) < 10:
+                    continue
+                try:
+                    peaks.append((cols[2], float(cols[4])))
+                except ValueError:
+                    continue
+
+        event_peak_cfs = None
+        event_peak_date = None
+        all_time_cfs = None
+        all_time_date = None
+        event_rank = None
+        if peaks:
+            window_peaks = [
+                (d, p) for d, p in peaks if iso_dates[0] <= d <= iso_dates[-1]
+            ]
+            if window_peaks:
+                event_peak_date, event_peak_cfs = max(window_peaks, key=lambda x: x[1])
+                event_rank = sum(1 for _, p in peaks if p > event_peak_cfs) + 1
+            all_time_date, all_time_cfs = max(peaks, key=lambda x: x[1])
+
+        gauges_out.append(
+            {
+                "site_no": sid,
+                "name": g["name"],
+                "distance_km": g["distance_km"],
+                "daily_cfs": daily_cfs,
+                "daily_m3s": daily_m3s,
+                "event_peak_cfs": event_peak_cfs,
+                "event_peak_date": event_peak_date,
+                "all_time_record_cfs": all_time_cfs,
+                "all_time_record_date": all_time_date,
+                "peaks_years_on_record": len(peaks),
+                "event_rank": event_rank,
+            }
+        )
+
+    return {
+        "found": True,
+        "dates": iso_dates,
+        "gauges": gauges_out,
+        "lat": lat,
+        "lon": lon,
+        "start_date": start_date,
+        "end_date": end,
+        "source": "USGS Water Services NWIS (daily values + annual peak streamflow)",
     }
