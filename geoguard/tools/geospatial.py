@@ -4,6 +4,7 @@ from geopy.distance import geodesic
 from geoguard.config import settings
 from geoguard.schemas import EventType
 from geoguard.tools.registry import registry
+from geoguard.utils import graceful_http
 
 
 @registry(EventType.FLOOD, EventType.STORM)
@@ -31,6 +32,7 @@ async def get_elevation(lat: float, lon: float) -> dict:
 
 
 @registry(EventType.FLOOD, EventType.STORM)
+@graceful_http
 async def find_nearest_water_body(
     lat: float,
     lon: float,
