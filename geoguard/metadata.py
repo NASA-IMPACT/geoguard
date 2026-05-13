@@ -5,7 +5,7 @@ from datetime import datetime
 from typing import Annotated, Literal
 
 from geopy.adapters import AioHTTPAdapter
-from geopy.geocoders import Photon
+from geopy.geocoders import Nominatim
 from pydantic import BaseModel, Field, computed_field, model_validator
 from pydantic_ai import Agent
 from pydantic_ai.capabilities import Thinking
@@ -97,12 +97,14 @@ class ClaimGroup(BaseModel):
 
 
 async def geocode(name: str) -> dict:
-    """Resolve a place name to coordinates via OpenStreetMap (Photon endpoint).
+    """Resolve a place name to coordinates via OpenStreetMap (Nominatim endpoint).
 
     Returns a dict with keys: found (bool), lat (float or None),
     lon (float or None), display_name (str).
     """
-    async with Photon(adapter_factory=AioHTTPAdapter) as geocoder:
+    async with Nominatim(
+        user_agent="geoguard", adapter_factory=AioHTTPAdapter
+    ) as geocoder:
         loc = await geocoder.geocode(name, timeout=settings.http_timeout_seconds)
     if loc is None:
         return {"found": False, "lat": None, "lon": None, "display_name": name}
