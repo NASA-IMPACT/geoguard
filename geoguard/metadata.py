@@ -127,9 +127,12 @@ GEOCODE_RULE = (
 
 
 TIME_RULE = (
-    "When the input states a date for an event, EVERY entry describing "
-    "that event MUST set time_range. Never leave time_range null on a "
-    "related entry when the date is in the input."
+    "If the input states a date or time for any event, EVERY ClaimGroup "
+    "whose claims describe phenomena connected to that event MUST have "
+    "time_range set to that date — even when the groups have different "
+    "event_types or describe different phases of a causal chain. Never "
+    "leave time_range null on a ClaimGroup whose claims reference an "
+    "event whose date is stated elsewhere in the input."
 )
 
 
