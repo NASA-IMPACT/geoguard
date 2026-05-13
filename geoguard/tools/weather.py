@@ -14,8 +14,14 @@ async def get_historical_precipitation(
 ) -> dict:
     """Daily precipitation in millimeters over a date range at the given coordinates.
 
-    Source: Open-Meteo Historical Archive (global, no API key required).
-    Data granularity is daily; the range is inclusive of both endpoints.
+    Source: Open-Meteo Historical Archive (ERA5 reanalysis). Daily
+    granularity; the range is inclusive of both endpoints.
+
+    ERA5 is a global gridded reanalysis (~9 km effective resolution),
+    not gauge data. It smooths and underestimates localized intense
+    rainfall, especially convective events — point gauge observations
+    at the same coordinates are routinely much higher than ERA5. Treat
+    ERA5 values as a lower bound when verifying point-rainfall claims.
 
     Args:
         start_date: Start of the inclusive range (YYYY-MM-DD).
