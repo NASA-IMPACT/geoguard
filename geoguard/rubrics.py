@@ -3,7 +3,7 @@ from pydantic_ai import Agent
 from pydantic_ai.capabilities import Thinking
 
 from geoguard.claims import Claim
-from geoguard.config import ReasoningEffort, settings
+from geoguard.config import ReasoningEffort, build_model, settings
 from geoguard.schemas import Input
 from geoguard.verifications import VerifierResult
 
@@ -73,6 +73,7 @@ class Rubricator:
     def __init__(
         self,
         model: str | None = None,
+        api_key: str | None = None,
         reasoning_effort: ReasoningEffort | None = None,
         instructions: str | None = None,
         questions_per_claim: tuple[int, int] = (5, 10),
@@ -80,7 +81,7 @@ class Rubricator:
     ):
         self._questions_per_claim = questions_per_claim
         self._agent = Agent(
-            model=model or settings.model,
+            model=build_model(model, api_key),
             output_type=Rubric,
             capabilities=[
                 Thinking(effort=reasoning_effort or settings.reasoning_effort),

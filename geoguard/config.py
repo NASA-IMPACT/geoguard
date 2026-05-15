@@ -1,6 +1,7 @@
 from typing import Literal
 
 from pydantic import Field
+from pydantic_ai.models import Model, infer_model, infer_provider_class
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 ReasoningEffort = Literal["minimal", "low", "medium", "high"]
@@ -17,6 +18,13 @@ class Settings(BaseSettings):
     # constructor params are None.
     model: str = "openai:gpt-5.2"
     reasoning_effort: ReasoningEffort = "medium"
+
+    # Optional explicit API key. When set, blocks construct providers with
+    # this key directly — concurrency-safe (no env mutation), required for
+    # multi-tenant deployments (e.g. an HF Space accepting BYOK). When None
+    # (default), pydantic-ai reads the provider's standard env var
+    # (`OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, …).
+    api_key: str | None = None
 
     # Claim extraction — applied by GeoGuard.from_config().
     max_claims: int | None = 15
@@ -37,3 +45,33 @@ class Settings(BaseSettings):
 
 
 settings = Settings()
+
+
+def build_model(
+    model: str | None = None,
+    api_key: str | None = None,
+) -> Model | str:
+    """Resolve a `provider:name` model string to a pydantic-ai Model.
+
+    Provider-agnostic: works for `openai:`, `anthropic:`, etc. — anything
+    pydantic-ai's `infer_provider_class` knows about.
+
+    - `api_key=None` → return the string unchanged; pydantic-ai's normal
+      env-driven path constructs the provider and reads its standard env
+      var (`OPENAI_API_KEY`, …) at agent-construction time.
+    - `api_key="..."` → construct the provider explicitly with that key.
+      Concurrency-safe: multiple GeoGuard instances with different keys
+      coexist without env-var races.
+
+    Defaults to `settings.model` / `settings.api_key` when either argument
+    is None.
+    """
+    resolved_model = model or settings.model
+    resolved_key = api_key or settings.api_key
+    if resolved_key is None:
+        return resolved_model
+
+    def _factory(provider_name: str):
+        return infer_provider_class(provider_name)(api_key=resolved_key)
+
+    return infer_model(resolved_model, provider_factory=_factory)

@@ -7,7 +7,7 @@ from pydantic_ai import Agent
 from pydantic_ai.capabilities import Thinking
 
 from geoguard.claims import Claim
-from geoguard.config import ReasoningEffort, settings
+from geoguard.config import ReasoningEffort, build_model, settings
 from geoguard.metadata import Metadata
 from geoguard.tools.registry import registry
 
@@ -48,12 +48,13 @@ class ToolSelector:
     def __init__(
         self,
         model: str | None = None,
+        api_key: str | None = None,
         reasoning_effort: ReasoningEffort | None = None,
         instructions: str | None = None,
         **agent_kwargs,
     ):
         self._agent = Agent(
-            model=model or settings.model,
+            model=build_model(model, api_key),
             output_type=ToolSelection,
             capabilities=[
                 Thinking(effort=reasoning_effort or settings.reasoning_effort),

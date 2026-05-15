@@ -6,7 +6,7 @@ from collections.abc import AsyncIterator
 from pydantic import BaseModel, ConfigDict
 
 from geoguard.claims import Claim
-from geoguard.config import Settings
+from geoguard.config import ReasoningEffort, Settings
 from geoguard.config import settings as default_settings
 from geoguard.metadata import (
     CLAIM_GROUP_INSTRUCTIONS,
@@ -35,18 +35,30 @@ PipelineEvent = ClaimGroup | Claim | SelectedTools | VerifierResult | Rubric | R
 class GeoGuard:
     def __init__(
         self,
+        model: str | None = None,
+        api_key: str | None = None,
+        reasoning_effort: ReasoningEffort | None = None,
         metadata_extractor: MetadataExtractor | None = None,
         tool_selector: ToolSelector | None = None,
         verifier: Verifier | None = None,
         rubricator: Rubricator | None = None,
     ):
         self.metadata_extractor = metadata_extractor or MetadataExtractor(
+            model=model,
+            api_key=api_key,
+            reasoning_effort=reasoning_effort,
             output_type=list[ClaimGroup],
             instructions=CLAIM_GROUP_INSTRUCTIONS,
         )
-        self.tool_selector = tool_selector or ToolSelector()
-        self.verifier = verifier or Verifier()
-        self.rubricator = rubricator or Rubricator()
+        self.tool_selector = tool_selector or ToolSelector(
+            model=model, api_key=api_key, reasoning_effort=reasoning_effort
+        )
+        self.verifier = verifier or Verifier(
+            model=model, api_key=api_key, reasoning_effort=reasoning_effort
+        )
+        self.rubricator = rubricator or Rubricator(
+            model=model, api_key=api_key, reasoning_effort=reasoning_effort
+        )
 
     @classmethod
     def from_config(cls, settings: Settings | None = None) -> GeoGuard:
@@ -55,21 +67,25 @@ class GeoGuard:
         return cls(
             metadata_extractor=MetadataExtractor(
                 model=s.model,
+                api_key=s.api_key,
                 reasoning_effort=s.reasoning_effort,
                 output_type=list[ClaimGroup],
                 max_claims=s.max_claims,
             ),
             tool_selector=ToolSelector(
                 model=s.model,
+                api_key=s.api_key,
                 reasoning_effort=s.reasoning_effort,
             ),
             verifier=Verifier(
                 model=s.model,
+                api_key=s.api_key,
                 reasoning_effort=s.reasoning_effort,
                 tool_calls_limit=s.verification_tool_usage_limit,
             ),
             rubricator=Rubricator(
                 model=s.model,
+                api_key=s.api_key,
                 reasoning_effort=s.reasoning_effort,
                 questions_per_claim=(
                     s.questions_per_claim_min,

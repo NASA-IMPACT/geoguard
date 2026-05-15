@@ -11,7 +11,7 @@ from pydantic_ai import Agent
 from pydantic_ai.capabilities import Thinking
 
 from .claims import CLAIM_RULES, DEFAULT_MAX_CLAIMS, Claim
-from .config import ReasoningEffort, settings
+from .config import ReasoningEffort, build_model, settings
 from .schemas import EventType, Input
 
 
@@ -195,6 +195,7 @@ class MetadataExtractor:
     def __init__(
         self,
         model: str | None = None,
+        api_key: str | None = None,
         reasoning_effort: ReasoningEffort | None = None,
         instructions: str | None = None,
         output_type=list[Metadata],
@@ -202,7 +203,7 @@ class MetadataExtractor:
         geocoder: Callable[[str], Awaitable[dict]] = geocode,
     ):
         self._agent = Agent(
-            model=model or settings.model,
+            model=build_model(model, api_key),
             output_type=output_type,
             tools=[geocoder],
             capabilities=[
