@@ -39,6 +39,23 @@ class VerifierResult:
     tool_calls: list[ToolCall]
 
 
+NARRATIVE_RULE = (
+    "Disaster-reporting language uses summary phrasing that is not a strict "
+    'measurement. Phrases like "up to X", "approximately X", or "around X" '
+    "name a representative or peak value, not a hard bound. Phrases like "
+    '"X to Y across [region]" give a regional summary that tolerates '
+    "individual readings outside the stated range. Words like "
+    '"record", "historic", "catastrophic", "major", or "widespread" mean '
+    "unusually large relative to context, not strictly the all-time "
+    "maximum. When tool evidence matches the claim's direction and "
+    "magnitude but lands marginally outside its literal wording — a "
+    "reading slightly past a stated peak, a few readings outside an "
+    "areal range, or a near-top ranking on a superlative claim — return "
+    "SUPPORTS. Reserve CONTRADICTS for evidence that disagrees with the "
+    "claim's core assertion, not its phrasing."
+)
+
+
 DEFAULT_INSTRUCTIONS = (
     "Verify the given claim using the tools attached. Reason over the claim "
     "and metadata, call the tools you need to gather evidence, and return a "
@@ -46,7 +63,7 @@ DEFAULT_INSTRUCTIONS = (
     "directly confirms the claim), CONTRADICTS (tool evidence directly "
     "disconfirms the claim), or INCONCLUSIVE (insufficient or ambiguous "
     "evidence). Cite the evidence you used in the rationale. If no tools "
-    "are available, the verdict must be INCONCLUSIVE."
+    "are available, the verdict must be INCONCLUSIVE.\n\n" + NARRATIVE_RULE
 )
 
 
