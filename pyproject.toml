@@ -22,3 +22,6 @@ dev = [
     "marimo>=0.23.5",
     "pre-commit>=4.0.1",
 ]
+
+[tool.ruff]
+exclude = ["notebooks/"]

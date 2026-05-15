@@ -218,7 +218,8 @@ __marimo__/
 .streamlit/secrets.toml
 
 # Local working dirs
-notebooks/
+notebooks/*
+!notebooks/geoguard-e2e.py
 tmp/
 temp/
 
