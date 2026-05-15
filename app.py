@@ -242,7 +242,7 @@ def friendly_error(exc: Exception) -> str:
 
 # ── UI ────────────────────────────────────────────────────────────────
 
-with gr.Blocks(title="GeoGuard — live demo", theme=gr.themes.Soft()) as demo:
+with gr.Blocks(title="GeoGuard — live demo") as demo:
     gr.Markdown(
         "# GeoGuard — live demo\n"
         "Agentic guardrails & validation framework for geospatial AI. "
@@ -392,4 +392,4 @@ with gr.Blocks(title="GeoGuard — live demo", theme=gr.themes.Soft()) as demo:
 
 
 if __name__ == "__main__":
-    demo.launch()
+    demo.launch(theme=gr.themes.Soft())
