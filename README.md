@@ -1,3 +1,17 @@
+---
+title: GeoGuard
+emoji: 🌍
+colorFrom: blue
+colorTo: green
+sdk: gradio
+sdk_version: "6.14.0"
+python_version: "3.12"
+app_file: app.py
+pinned: false
+license: apache-2.0
+short_description: Agentic guardrails & validation for geospatial AI claims.
+---
+
 # GeoGuard
 
 Pluggable guardrail framework for geospatial AI.

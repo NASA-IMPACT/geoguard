@@ -1,0 +1,7 @@
+# HF Space runtime deps. Mirrors the relevant subset of pyproject.toml —
+# omits marimo (dev-only) and dev tooling. The `geoguard/` package is
+# importable directly from the Space repo root, so no install is needed.
+gradio>=6.0
+pydantic-ai>=1.93.0
+pydantic-settings>=2.14.1
+geopy>=2.4.1

@@ -239,6 +239,7 @@ temp/
 *.tiff
 *.ico
 *.txt
+!requirements.txt
 
 # Local agent / IDE state
 .agents/
