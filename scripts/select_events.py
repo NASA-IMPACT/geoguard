@@ -5,9 +5,9 @@ coordinates, narrative), scores them by richness, then samples a diverse
 subset across regions, event types, and severity levels.
 
 Usage:
-    python benchmarks/select_events.py --n 5
-    python benchmarks/select_events.py --n 25 --seed 42
-    python benchmarks/select_events.py --n 5 --show  # preview without writing
+    python scripts/select_events.py --n 5
+    python scripts/select_events.py --n 25 --seed 42
+    python scripts/select_events.py --n 5 --show  # preview without writing
 """
 
 from __future__ import annotations
@@ -19,8 +19,9 @@ import re
 import sys
 from pathlib import Path
 
-DATA_PATH = Path(__file__).parent / "data" / "NOAA-Storm-Events-Data.csv"
-OUTPUT_PATH = Path(__file__).parent / "data" / "selected_events.csv"
+_ROOT = Path(__file__).resolve().parent.parent
+DATA_PATH = _ROOT / "data" / "NOAA-Storm-Events-Data.csv"
+OUTPUT_PATH = _ROOT / "data" / "selected_events.csv"
 
 USABLE_EVENT_TYPES = {"Flood", "Flash Flood", "Coastal Flood", "Lakeshore Flood"}
 

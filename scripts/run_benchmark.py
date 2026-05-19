@@ -6,12 +6,12 @@ one row per extracted claim per event.
 
 Usage:
     # First select events
-    python benchmarks/select_events.py --n 5
+    python scripts/select_events.py --n 5
 
     # Then run the benchmark
-    python benchmarks/run_benchmark.py
-    python benchmarks/run_benchmark.py --model anthropic:claude-sonnet-4-20250514
-    python benchmarks/run_benchmark.py --input benchmarks/data/selected_events.csv
+    python scripts/run_benchmark.py
+    python scripts/run_benchmark.py --model anthropic:claude-sonnet-4-20250514
+    python scripts/run_benchmark.py --input data/selected_events.csv
 """
 
 from __future__ import annotations
@@ -35,8 +35,9 @@ from geoguard.rubrics import Rubric
 from geoguard.tools.selector import SelectedTools
 from geoguard.verifications import VerifierResult
 
-INPUT_PATH = Path(__file__).parent / "data" / "selected_events.csv"
-OUTPUT_PATH = Path(__file__).parent / "data" / "benchmark_65_results.csv"
+_ROOT = Path(__file__).resolve().parent.parent
+INPUT_PATH = _ROOT / "data" / "selected_events.csv"
+OUTPUT_PATH = _ROOT / "data" / "benchmark_65_results.csv"
 
 RESULT_COLUMNS = [
     # --- event-level (from selected_events.csv) ---
