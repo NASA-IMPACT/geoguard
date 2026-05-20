@@ -16,15 +16,19 @@ def _():
     # Register flood tools via side-effect imports (their @registry decorators
     # run on import). Both modules ship with the framework.
     import geoguard.tools.geospatial  # noqa: F401  get_elevation + find_nearest_water_body
+    import geoguard.tools.satellite  # noqa: F401  get_satellite_flood_extent (MODIS 250m)
     import geoguard.tools.weather  # noqa: F401  get_historical_precipitation + get_historical_winds
     from geoguard import GeoGuard, Input, Rubric
+    from geoguard.adapters import tiff_to_claims
     from geoguard.claims import Claim
     from geoguard.metadata import ClaimGroup
     from geoguard.pipeline import Report
+    from geoguard.schemas import BoundingBox, TiffRef
     from geoguard.tools.selector import SelectedTools
     from geoguard.verifications import Verdict, VerifierResult
 
     return (
+        BoundingBox,
         Claim,
         ClaimGroup,
         GeoGuard,
@@ -32,21 +36,21 @@ def _():
         Report,
         Rubric,
         SelectedTools,
+        TiffRef,
         Verdict,
         VerifierResult,
+        tiff_to_claims,
     )
 
 
 @app.cell
 def _(mo):
-    mo.md(
-        """
-        # GeoGuard end-to-end demo
+    mo.md("""
+    # GeoGuard end-to-end demo
 
-        Streaming pipeline: **claim extraction → metadata → tool selection → verification → report**.
-        Uses real public APIs (no keys): OpenStreetMap Nominatim for geocoding, Open-Meteo for historical weather.
-        """
-    )
+    Streaming pipeline: **claim extraction → metadata → tool selection → verification → report**.
+    Uses real public APIs (no keys): OpenStreetMap Nominatim for geocoding, Open-Meteo for historical weather.
+    """)
     return
 
 
@@ -87,6 +91,8 @@ def _(mo):
         "along the Texas coast. Heavy rainfall caused widespread flooding in Houston, "
         "with reports of over 100 mm of rain falling over a 24-hour period."
     )
+
+    # --- Common controls ---
     model_input = mo.ui.text(
         value="openai:gpt-5.2",
         label="**Model** (`provider:name`)",
@@ -103,22 +109,170 @@ def _(mo):
         value="medium",
         label="**Reasoning effort**",
     )
+
+    # --- Text tab ---
     text_input = mo.ui.text_area(
         value=DEFAULT_TEXT,
         rows=6,
         full_width=True,
         label="**Input text** to verify",
     )
+
+    # --- TIFF tab ---
+    tiff_upload = mo.ui.file(
+        filetypes=[".tif", ".tiff"],
+        kind="area",
+        label="Upload a flood detection mask (0=dry, 1=flood, 255=nodata)",
+    )
+    tiff_bbox = mo.ui.text(
+        value="-122.172, 38.175, -121.381, 39.601",
+        label="**Bounding box** (west, south, east, north)",
+        full_width=True,
+    )
+    tiff_date = mo.ui.text(
+        value="2023-01-22",
+        label="**Event date** (YYYY-MM-DD)",
+        full_width=True,
+    )
+    tiff_region = mo.ui.text(
+        value="Sacramento Valley, California, USA",
+        label="**Region name**",
+        full_width=True,
+    )
+    tiff_model_name = mo.ui.text(
+        value="Prithvi-EO",
+        label="**Model name**",
+        full_width=True,
+    )
+    tiff_source = mo.ui.text(
+        value="Sentinel-2",
+        label="**Input source**",
+        full_width=True,
+    )
+
+    input_tabs = mo.ui.tabs(
+        {
+            "📝 Text": mo.vstack([text_input]),
+            "🛰️ TIFF Upload": mo.vstack(
+                [
+                    tiff_upload,
+                    mo.hstack([tiff_bbox, tiff_date], widths="equal"),
+                    mo.hstack(
+                        [tiff_region, tiff_model_name, tiff_source], widths="equal"
+                    ),
+                ]
+            ),
+        }
+    )
+
     run_button = mo.ui.run_button(label="🔎 Verify")
     mo.vstack(
         [
             mo.hstack([model_input, reasoning_input], justify="start"),
             api_key_input,
-            text_input,
+            input_tabs,
             run_button,
         ]
     )
-    return api_key_input, model_input, reasoning_input, run_button, text_input
+    return (
+        api_key_input,
+        input_tabs,
+        model_input,
+        reasoning_input,
+        run_button,
+        text_input,
+        tiff_bbox,
+        tiff_date,
+        tiff_model_name,
+        tiff_region,
+        tiff_source,
+        tiff_upload,
+    )
+
+
+@app.cell
+def _(
+    BoundingBox,
+    Input,
+    TiffRef,
+    input_tabs,
+    mo,
+    text_input,
+    tiff_bbox,
+    tiff_date,
+    tiff_model_name,
+    tiff_region,
+    tiff_source,
+    tiff_to_claims,
+    tiff_upload,
+):
+    """Resolve the active input tab into a pipeline Input.
+
+    Pipeline-level abstraction: in TIFF mode we hand the pipeline a
+    TiffRef and let InputProcessor do the conversion. The local
+    tiff_to_claims call is preview-only (cheap, non-LLM) so the user
+    can see the text that will feed downstream extraction.
+    """
+    import tempfile
+
+    _pipeline_input = None
+    _preview_text = ""
+    _tiff_error = ""
+
+    if input_tabs.value == "🛰️ TIFF Upload":
+        if tiff_upload.value:
+            try:
+                with tempfile.NamedTemporaryFile(suffix=".tif", delete=False) as _f:
+                    _f.write(tiff_upload.value[0].contents)
+                    _tiff_path = _f.name
+                _b = [float(x.strip()) for x in tiff_bbox.value.split(",")]
+                _bbox = BoundingBox(
+                    lon_min=_b[0], lat_min=_b[1], lon_max=_b[2], lat_max=_b[3]
+                )
+                _pipeline_input = Input(
+                    images=[
+                        TiffRef(
+                            path=_tiff_path,
+                            bbox=_bbox,
+                            date=tiff_date.value.strip(),
+                            region_name=tiff_region.value.strip(),
+                            model_name=tiff_model_name.value.strip(),
+                            input_source=tiff_source.value.strip(),
+                        )
+                    ]
+                )
+                _preview_text = tiff_to_claims(
+                    tiff_path=_tiff_path,
+                    bbox=_b,
+                    date=tiff_date.value.strip(),
+                    region_name=tiff_region.value.strip(),
+                    model_name=tiff_model_name.value.strip(),
+                    input_source=tiff_source.value.strip(),
+                )
+            except Exception as e:
+                _tiff_error = str(e)
+        if _preview_text:
+            mo.output.replace(
+                mo.vstack(
+                    [
+                        mo.md("### Generated claims from TIFF"),
+                        mo.callout(mo.md(_preview_text), kind="info"),
+                    ]
+                )
+            )
+        elif _tiff_error:
+            mo.output.replace(
+                mo.callout(mo.md(f"**Error reading TIFF:** {_tiff_error}"), kind="danger")
+            )
+        else:
+            mo.output.replace(mo.md("_Upload a TIFF file to generate claims._"))
+    else:
+        if text_input.value:
+            _pipeline_input = Input(text=text_input.value)
+        mo.output.replace(mo.md(""))
+
+    pipeline_input = _pipeline_input
+    return (pipeline_input,)
 
 
 @app.cell
@@ -142,7 +296,6 @@ async def _(
     Claim,
     ClaimGroup,
     GeoGuard,
-    Input,
     Report,
     Rubric,
     SelectedTools,
@@ -152,11 +305,12 @@ async def _(
     api_key_input,
     mo,
     model_input,
+    pipeline_input,
     reasoning_input,
     run_button,
-    text_input,
 ):
     mo.stop(not run_button.value, mo.md("_Click **Verify** to run the pipeline._"))
+    mo.stop(pipeline_input is None, mo.callout(mo.md("**No input.** Enter text or upload a TIFF."), kind="warn"))
 
     guard = GeoGuard(
         model=model_input.value.strip() or None,
@@ -166,7 +320,7 @@ async def _(
     events = []
 
     with mo.status.spinner(title="Starting pipeline..."):
-        async for item in guard(Input(text=text_input.value)):
+        async for item in guard(pipeline_input):
             events.append(item)
 
             if isinstance(item, ClaimGroup):

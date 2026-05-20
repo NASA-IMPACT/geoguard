@@ -30,7 +30,13 @@ DEFAULT_INSTRUCTIONS = (
     "pick the subset best suited to verify the claim. Match the tool's "
     "parameter types against the context available in the metadata — only "
     "pick tools whose params can be satisfied. Return the names of selected "
-    "tools. Skip tools that would not provide useful evidence."
+    "tools. Skip tools that would not provide useful evidence.\n\n"
+    "IMPORTANT: For any flood-related claim, ALWAYS include precipitation "
+    "and streamflow tools as baseline corroborating evidence — even when "
+    "the claim's specific metric (e.g. flood extent in km², zone counts, "
+    "satellite detections) cannot be directly verified. Heavy rainfall or "
+    "elevated river discharge at the stated location and date supports "
+    "the occurrence of flooding, which indirectly supports the claim."
 )
 
 
@@ -77,8 +83,10 @@ class ToolSelector:
         )
         result = await self._agent.run(prompt, **run_kwargs)
         chosen = set(result.output.chosen)
+        selected = [c for c in candidates if c.__name__ in chosen] or candidates
+
         return SelectedTools(
-            tools=[c for c in candidates if c.__name__ in chosen],
+            tools=selected,
             reasoning=result.output.reasoning,
             claim=claim,
         )

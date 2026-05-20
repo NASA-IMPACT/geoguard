@@ -36,18 +36,12 @@ def _cap_rule(max_claims: int | None) -> str:
     )
 
 
-def default_instructions(max_claims: int | None = DEFAULT_MAX_CLAIMS) -> str:
-    return (
-        "Extract atomic, decontextualized, individually verifiable factual claims "
-        "from the input.\n\n"
-        + CLAIM_RULES
-        + "\n\nLimits:\n"
-        + _cap_rule(max_claims)
-        + "\n\nSkip opinions, hedges, and meta-commentary."
-    )
-
-
-DEFAULT_INSTRUCTIONS = default_instructions()
+DEFAULT_INSTRUCTIONS = (
+    "Extract atomic, decontextualized, individually verifiable factual claims "
+    "from the input.\n\n"
+    + CLAIM_RULES
+    + "\n\nSkip opinions, hedges, and meta-commentary."
+)
 
 
 class Claim(BaseModel):
@@ -72,15 +66,18 @@ class ClaimExtractor:
         model: str | None = None,
         reasoning_effort: ReasoningEffort | None = None,
         instructions: str | None = None,
-        max_claims: int | None = DEFAULT_MAX_CLAIMS,
+        max_claims: int | None = None,
     ):
+        instructions = instructions or DEFAULT_INSTRUCTIONS
+        if max_claims is not None:
+            instructions += f"\n\nLimits:\n{_cap_rule(max_claims)}"
         self._agent = Agent(
             model=model or settings.model,
             output_type=list[Claim],
             capabilities=[
                 Thinking(effort=reasoning_effort or settings.reasoning_effort),
             ],
-            instructions=instructions or default_instructions(max_claims),
+            instructions=instructions,
         )
 
     async def __call__(self, inp: Input) -> list[Claim]:

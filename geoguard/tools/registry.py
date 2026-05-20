@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+import functools
+import json
 from collections import defaultdict
 from typing import Callable
 
+from loguru import logger
 from pydantic_ai.toolsets import FunctionToolset
 
 from geoguard.schemas import EventType
@@ -76,9 +79,47 @@ class ToolRegistry:
         return list({fn.__name__: fn for fn in matched}.values())
 
     def build_toolset(
-        self, tools: list[Callable], id: str = "selected"
+        self,
+        tools: list[Callable],
+        id: str = "selected",
+        deduplicate: bool = True,
     ) -> FunctionToolset:
-        return FunctionToolset(tools=tools, id=id)
+        """Build a pydantic-ai FunctionToolset from a list of tool callables.
+
+        When *deduplicate* is True (default), each tool is wrapped so that
+        repeated calls with identical arguments return the cached result
+        from the first invocation.  The cache is scoped to this toolset
+        instance — i.e. one cache per claim verification.
+        """
+        wrapped = [_deduplicated(fn) for fn in tools] if deduplicate else tools
+        return FunctionToolset(tools=wrapped, id=id)
+
+
+def _cache_key(args: tuple, kwargs: dict) -> str:
+    """Deterministic JSON key from positional + keyword arguments."""
+    return json.dumps({"a": args, "k": kwargs}, sort_keys=True, default=str)
+
+
+def _deduplicated(fn: Callable) -> Callable:
+    """Wrap an async tool with per-instance call deduplication.
+
+    On the first call with a given set of arguments the real function
+    executes and its result is cached.  Subsequent calls with the same
+    arguments return the cached value immediately — no network request.
+    """
+    cache: dict[str, object] = {}
+
+    @functools.wraps(fn)
+    async def wrapper(*args, **kwargs):
+        key = _cache_key(args, kwargs)
+        if key in cache:
+            logger.debug(f"dedup cache hit: {fn.__name__}({key})")
+            return cache[key]
+        result = await fn(*args, **kwargs)
+        cache[key] = result
+        return result
+
+    return wrapper
 
 
 registry = ToolRegistry()
