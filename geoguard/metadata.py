@@ -12,7 +12,7 @@ from pydantic_ai.capabilities import Thinking
 
 from .claims import CLAIM_RULES, Claim
 from .config import ReasoningEffort, build_model, settings
-from .schemas import EventType, Input
+from .schemas import BoundingBox, EventType, Input
 
 
 class GeoLocation(BaseModel):
@@ -69,13 +69,6 @@ class GeneralMetadata(BaseModel):
     location: GeoLocation | None = None
     time_range: TimeRange | None = None
     entities: list[Entity] = []
-
-
-class BoundingBox(BaseModel):
-    lon_min: float
-    lat_min: float
-    lon_max: float
-    lat_max: float
 
 
 class FloodMetadata(GeneralMetadata):
