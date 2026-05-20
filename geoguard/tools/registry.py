@@ -2,15 +2,13 @@ from __future__ import annotations
 
 import functools
 import json
-import logging
 from collections import defaultdict
 from typing import Callable
 
+from loguru import logger
 from pydantic_ai.toolsets import FunctionToolset
 
 from geoguard.schemas import EventType
-
-logger = logging.getLogger(__name__)
 
 
 class ToolRegistry:
@@ -115,7 +113,7 @@ def _deduplicated(fn: Callable) -> Callable:
     async def wrapper(*args, **kwargs):
         key = _cache_key(args, kwargs)
         if key in cache:
-            logger.debug("dedup cache hit: %s(%s)", fn.__name__, key)
+            logger.debug(f"dedup cache hit: {fn.__name__}({key})")
             return cache[key]
         result = await fn(*args, **kwargs)
         cache[key] = result
