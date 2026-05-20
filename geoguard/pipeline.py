@@ -38,17 +38,20 @@ class GeoGuard:
         model: str | None = None,
         api_key: str | None = None,
         reasoning_effort: ReasoningEffort | None = None,
+        max_claims: int | None = None,
         metadata_extractor: MetadataExtractor | None = None,
         tool_selector: ToolSelector | None = None,
         verifier: Verifier | None = None,
         rubricator: Rubricator | None = None,
     ):
+        # Resolve max_claims: explicit arg → settings → hardcoded default
+        _max_claims = max_claims if max_claims is not None else default_settings.max_claims
         self.metadata_extractor = metadata_extractor or MetadataExtractor(
             model=model,
             api_key=api_key,
             reasoning_effort=reasoning_effort,
             output_type=list[ClaimGroup],
-            instructions=CLAIM_GROUP_INSTRUCTIONS,
+            max_claims=_max_claims,
         )
         self.tool_selector = tool_selector or ToolSelector(
             model=model, api_key=api_key, reasoning_effort=reasoning_effort
@@ -164,10 +167,19 @@ class GeoGuard:
 
 
 def _roll_up(verdicts: list[Verdict]) -> Verdict:
+    """Aggregate per-claim verdicts into a single event-level verdict.
+
+    Rules (applied in order):
+    1. Any CONTRADICTS → overall CONTRADICTS  (safety-first)
+    2. At least one SUPPORTS and no CONTRADICTS → overall SUPPORTS
+       (INCONCLUSIVE claims simply mean "no data" — they don't negate
+       positive evidence from other claims)
+    3. All INCONCLUSIVE → INCONCLUSIVE
+    """
     if not verdicts:
         return Verdict.INCONCLUSIVE
     if Verdict.CONTRADICTS in verdicts:
         return Verdict.CONTRADICTS
-    if all(v == Verdict.SUPPORTS for v in verdicts):
+    if Verdict.SUPPORTS in verdicts:
         return Verdict.SUPPORTS
     return Verdict.INCONCLUSIVE
