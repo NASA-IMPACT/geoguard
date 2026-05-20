@@ -27,7 +27,6 @@ import httpx
 import numpy as np
 import rasterio
 
-from geoguard.config import settings
 from geoguard.schemas import EventType
 from geoguard.tools.registry import registry
 from geoguard.utils import graceful_http
@@ -36,6 +35,7 @@ from geoguard.utils import graceful_http
 # ---------------------------------------------------------------------------
 # Auth
 # ---------------------------------------------------------------------------
+
 
 async def _get_earthdata_token(client: httpx.AsyncClient) -> str:
     """Obtain or reuse a bearer token from NASA Earthdata Login."""
@@ -67,6 +67,7 @@ async def _get_earthdata_token(client: httpx.AsyncClient) -> str:
 # ---------------------------------------------------------------------------
 # Tile math
 # ---------------------------------------------------------------------------
+
 
 def _tile_hv(lat: float, lon: float) -> tuple[int, int]:
     """Convert lat/lon to MODIS flood product tile indices."""
@@ -113,9 +114,7 @@ def _lance_url(d: date, h: int, v: int) -> str:
     )
 
 
-async def _download(
-    client: httpx.AsyncClient, url: str, headers: dict
-) -> bytes | None:
+async def _download(client: httpx.AsyncClient, url: str, headers: dict) -> bytes | None:
     """Download a file. Returns bytes or None on 404/error."""
     try:
         r = await client.get(url, headers=headers, follow_redirects=True, timeout=90.0)
@@ -138,7 +137,9 @@ async def _find_laads_filename(
     dir_url = f"{_LAADS_BASE}/{d.year}/{doy:03d}/"
     headers = {"Authorization": f"Bearer {app_key}"}
     try:
-        r = await client.get(dir_url, headers=headers, follow_redirects=True, timeout=30.0)
+        r = await client.get(
+            dir_url, headers=headers, follow_redirects=True, timeout=30.0
+        )
         if r.status_code != 200:
             return None
         pattern = rf"(MCDWD_L3\.A{d.year}{doy:03d}\.h{h:02d}v{v:02d}\.061\.\d+\.hdf)"
@@ -160,7 +161,7 @@ async def _download_tile(
         url = _lance_url(d2, h, v)
         data = await _download(client, url, headers)
         if data and len(data) > 1000:
-            src = f"LANCE NRT" + (f" (offset {offset:+d}d)" if offset else "")
+            src = "LANCE NRT" + (f" (offset {offset:+d}d)" if offset else "")
             return data, src
 
     # 2. Try LAADS archive (HDF, historical)
@@ -175,7 +176,9 @@ async def _download_tile(
                 url = f"{_LAADS_BASE}/{d2.year}/{doy:03d}/{fname}"
                 data = await _download(client, url, laads_headers)
                 if data and len(data) > 1000:
-                    src = f"LAADS Archive" + (f" (offset {offset:+d}d)" if offset else "")
+                    src = "LAADS Archive" + (
+                        f" (offset {offset:+d}d)" if offset else ""
+                    )
                     return data, src
 
     return None, ""
@@ -185,7 +188,13 @@ async def _download_tile(
 # Analysis
 # ---------------------------------------------------------------------------
 
-_LABEL = {0: "no_water", 1: "reference_water", 2: "recurring_flood", 3: "flood", 255: "no_data"}
+_LABEL = {
+    0: "no_water",
+    1: "reference_water",
+    2: "recurring_flood",
+    3: "flood",
+    255: "no_data",
+}
 
 
 def _read_array(data: bytes, is_hdf: bool) -> np.ndarray:
@@ -196,6 +205,7 @@ def _read_array(data: bytes, is_hdf: bool) -> np.ndarray:
         tmp.flush()
         if is_hdf:
             from pyhdf.SD import SD, SDC
+
             hdf = SD(tmp.name, SDC.READ)
             # Use 3-day composite for best cloud coverage
             ds = hdf.select("Flood_3Day_250m")
@@ -208,7 +218,9 @@ def _read_array(data: bytes, is_hdf: bool) -> np.ndarray:
 
 
 def _crop_to_bbox(
-    arr: np.ndarray, h: int, v: int,
+    arr: np.ndarray,
+    h: int,
+    v: int,
     bbox: tuple[float, float, float, float],
 ) -> np.ndarray:
     """Crop a 4800×4800 tile array to a geographic bounding box.
@@ -231,7 +243,11 @@ def _crop_to_bbox(
 
 
 def _analyze_tile(
-    data: bytes, lat: float, lon: float, h: int, v: int,
+    data: bytes,
+    lat: float,
+    lon: float,
+    h: int,
+    v: int,
     is_hdf: bool = False,
     bbox: tuple[float, float, float, float] | None = None,
 ) -> dict:
@@ -253,7 +269,6 @@ def _analyze_tile(
     total_pixels = arr.size
     no_data_pixels = int(np.sum(arr == 255))
     valid_pixels = total_pixels - no_data_pixels
-    water_pixels = int(np.sum(arr == 1))
     recurring_flood_pixels = int(np.sum(arr == 2))
     flood_pixels = int(np.sum(arr == 3))
     flood_total = recurring_flood_pixels + flood_pixels
@@ -277,6 +292,7 @@ def _analyze_tile(
 # ---------------------------------------------------------------------------
 # Public tool
 # ---------------------------------------------------------------------------
+
 
 @registry(EventType.FLOOD)
 @graceful_http
@@ -333,6 +349,22 @@ async def get_satellite_flood_extent(
         source: Data source identifier.
         note: Cross-sensor comparison guidance.
     """
+    if not os.environ.get("EARTHDATA_USERNAME") or not os.environ.get(
+        "EARTHDATA_PASSWORD"
+    ):
+        return {
+            "found": False,
+            "reason": (
+                "Satellite flood-extent tool unavailable: EARTHDATA_USERNAME "
+                "and EARTHDATA_PASSWORD env vars are not set. Register at "
+                "https://urs.earthdata.nasa.gov/users/new and add to .env "
+                "to enable."
+            ),
+            "lat": lat,
+            "lon": lon,
+            "event_date": event_date,
+        }
+
     d = date.fromisoformat(event_date[:10])
     h, v = _tile_hv(lat, lon)
 
@@ -354,17 +386,18 @@ async def get_satellite_flood_extent(
         }
 
     bbox = None
-    if all(v is not None for v in (bbox_lon_min, bbox_lat_min, bbox_lon_max, bbox_lat_max)):
+    if all(
+        v is not None for v in (bbox_lon_min, bbox_lat_min, bbox_lon_max, bbox_lat_max)
+    ):
         bbox = (bbox_lon_min, bbox_lat_min, bbox_lon_max, bbox_lat_max)
 
     is_hdf = source_used.startswith("LAADS")
-    stats = _analyze_tile(
-        tile_bytes, lat, lon, h, v, is_hdf=is_hdf, bbox=bbox
-    )
+    stats = _analyze_tile(tile_bytes, lat, lon, h, v, is_hdf=is_hdf, bbox=bbox)
 
     return {
         "found": True,
-        "flood_detected_at_point": stats["point_classification"] in ("flood", "recurring_flood"),
+        "flood_detected_at_point": stats["point_classification"]
+        in ("flood", "recurring_flood"),
         "point_classification": stats["point_classification"],
         "flood_area_km2": stats["flood_area_km2"],
         "total_flood_pixels": stats["total_flood_pixels"],
