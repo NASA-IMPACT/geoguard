@@ -14,6 +14,7 @@ from geoguard.metadata import (
     Metadata,
     MetadataExtractor,
 )
+from geoguard.processors import InputProcessor
 from geoguard.rubrics import Rubric, Rubricator
 from geoguard.schemas import Input
 from geoguard.tools.selector import SelectedTools, ToolSelector
@@ -40,6 +41,7 @@ class GeoGuard:
         reasoning_effort: ReasoningEffort | None = None,
         max_claims: int | None = None,
         instructions: str | None = None,
+        input_processor: InputProcessor | None = None,
         metadata_extractor: MetadataExtractor | None = None,
         tool_selector: ToolSelector | None = None,
         verifier: Verifier | None = None,
@@ -48,6 +50,7 @@ class GeoGuard:
         _max_claims = (
             max_claims if max_claims is not None else default_settings.max_claims
         )
+        self.input_processor = input_processor or InputProcessor()
         self.metadata_extractor = metadata_extractor or MetadataExtractor(
             model=model,
             api_key=api_key,
@@ -71,6 +74,7 @@ class GeoGuard:
         """Build a GeoGuard with every block driven by Settings (env / .env)."""
         s = settings or default_settings
         return cls(
+            input_processor=InputProcessor(),
             metadata_extractor=MetadataExtractor(
                 model=s.model,
                 api_key=s.api_key,
@@ -116,6 +120,7 @@ class GeoGuard:
 
         Per-claim sub-pipelines run concurrently within each group.
         """
+        inp = await self.input_processor(inp)
         groups = await self.metadata_extractor(inp)
         verifications: list[VerifierResult] = []
         SENTINEL: object = object()
