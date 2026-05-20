@@ -432,23 +432,23 @@ with gr.Blocks(title="GeoGuard — live demo") as demo:
                 )
                 tiff_bbox = gr.Textbox(
                     label="Bounding box (west, south, east, north)",
-                    placeholder="-122.172, 38.175, -121.381, 39.601",
+                    value="-121.974, 38.888, -121.579, 39.601",
                 )
                 tiff_date = gr.Textbox(
                     label="Event date (YYYY-MM-DD)",
-                    placeholder="2023-01-22",
+                    value="2023-01-22",
                 )
                 tiff_region = gr.Textbox(
                     label="Region name",
-                    placeholder="Sacramento Valley, California, USA",
+                    value="Sacramento Valley, California, USA",
                 )
                 tiff_model_name = gr.Textbox(
                     label="Model name",
-                    placeholder="Prithvi-EO",
+                    value="Prithvi-EO",
                 )
                 tiff_source = gr.Textbox(
                     label="Input source",
-                    placeholder="Sentinel-2",
+                    value="Sentinel-2",
                 )
                 gr.Examples(
                     examples=TIFF_EXAMPLES,
