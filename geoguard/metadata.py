@@ -223,7 +223,7 @@ class MetadataExtractor:
                 if output_type == list[ClaimGroup]
                 else DEFAULT_INSTRUCTIONS
             ),
-            output_retries=3,
+            output_retries=settings.output_retries,
         )
 
     async def __call__(self, inp: Input) -> list[Metadata]:

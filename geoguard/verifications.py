@@ -175,6 +175,8 @@ class Verifier:
         reasoning_effort: ReasoningEffort | None = None,
         instructions: str | None = None,
         tool_calls_limit: int | None = None,
+        request_limit: int | None = None,
+        output_retries: int | None = None,
         **agent_kwargs,
     ):
         self._model = build_model(model, api_key)
@@ -184,6 +186,14 @@ class Verifier:
             tool_calls_limit
             if tool_calls_limit is not None
             else settings.verification_tool_usage_limit
+        )
+        self._request_limit = (
+            request_limit
+            if request_limit is not None
+            else settings.verification_request_limit
+        )
+        self._output_retries = (
+            output_retries if output_retries is not None else settings.output_retries
         )
         self._agent_kwargs = agent_kwargs
 
@@ -201,7 +211,7 @@ class Verifier:
             toolsets=toolsets,
             capabilities=[Thinking(effort=self._reasoning_effort)],
             instructions=self._instructions,
-            output_retries=3,
+            output_retries=self._output_retries,
             **self._agent_kwargs,
         )
         tool_names = [t.__name__ for t in tools] if tools else []
@@ -219,7 +229,7 @@ class Verifier:
         result = await agent.run(
             prompt,
             usage_limits=UsageLimits(
-                request_limit=100,
+                request_limit=self._request_limit,
                 tool_calls_limit=self._tool_calls_limit,
             ),
             **run_kwargs,
