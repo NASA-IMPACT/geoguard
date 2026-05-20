@@ -364,9 +364,9 @@ with gr.Blocks(title="GeoGuard — live demo") as demo:
         with gr.Column(scale=2):
             gr.Markdown("### ⚙️ Settings")
             model_input = gr.Textbox(
-                value="openai:gpt-5.2",
+                value="openai:gpt-5.2-nano",
                 label="Model (`provider:name`)",
-                placeholder="openai:gpt-5.2",
+                placeholder="openai:gpt-5.2-nano",
             )
             api_key_input = gr.Textbox(
                 value="",
@@ -376,7 +376,7 @@ with gr.Blocks(title="GeoGuard — live demo") as demo:
             )
             reasoning_input = gr.Dropdown(
                 choices=["low", "medium", "high"],
-                value="medium",
+                value="low",
                 label="Reasoning effort",
             )
 
