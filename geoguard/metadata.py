@@ -71,11 +71,19 @@ class GeneralMetadata(BaseModel):
     entities: list[Entity] = []
 
 
+class BoundingBox(BaseModel):
+    lon_min: float
+    lat_min: float
+    lon_max: float
+    lat_max: float
+
+
 class FloodMetadata(GeneralMetadata):
     event_type: Literal[EventType.FLOOD] = EventType.FLOOD
     affected_area_km2: float | None = None
     water_depth_m: float | None = None
     river_basin: str | None = None
+    analysis_bbox: BoundingBox | None = None
 
 
 class StormMetadata(GeneralMetadata):
@@ -215,6 +223,7 @@ class MetadataExtractor:
                 if output_type == list[ClaimGroup]
                 else DEFAULT_INSTRUCTIONS
             ),
+            output_retries=3,
         )
 
     async def __call__(self, inp: Input) -> list[Metadata]:

@@ -256,7 +256,7 @@ async def get_streamflow_history(
     lon: float,
     start_date: str,
     end_date: str | None = None,
-    search_radius_km: float = 30.0,
+    search_radius_km: float = 50.0,
     max_gauges: int = 5,
 ) -> dict:
     """Daily streamflow at nearby USGS river gauges (US only).
@@ -274,9 +274,15 @@ async def get_streamflow_history(
     set a new all-time record; event_rank=2 means second-highest; None
     means no annual peak was recorded in this window.
 
+    Returns both **gage height** (water level in feet, parameter 00065)
+    and **discharge** (flow in cfs, parameter 00060) when available. Gage
+    height is the most intuitive flood indicator — e.g. "river at 42 ft
+    vs normal 28 ft" — while discharge quantifies total water volume.
+
     Note on units: USGS reports streamflow in cubic feet per second (cfs),
     which is the convention in US flood narratives. m³/s is provided in
-    parallel for metric audiences (1 cfs = 0.02831685 m³/s).
+    parallel for metric audiences (1 cfs = 0.02831685 m³/s). Gage height
+    is reported in feet (ft).
 
     Note on peaks vs daily means: USGS annual peaks are *instantaneous*
     maxima, typically higher than the daily mean of the same day. Compare
@@ -297,6 +303,8 @@ async def get_streamflow_history(
             site_no: USGS site number.
             name: Gauge station name.
             distance_km: Distance from query point.
+            daily_gage_height_ft: Daily mean gage height in feet (None
+                on missing). The most intuitive flood metric.
             daily_cfs: Daily mean discharge in cfs (None on missing).
             daily_m3s: Same series converted to m³/s.
             event_peak_cfs: Instantaneous annual peak that occurred in the
@@ -399,12 +407,14 @@ async def get_streamflow_history(
             }
 
         site_ids = ",".join(g["site_no"] for g in candidates)
+
+        # Fetch both discharge (00060) and gage height (00065)
         r_dv = await c.get(
             dv_url,
             params={
                 "format": "json",
                 "sites": site_ids,
-                "parameterCd": "00060",
+                "parameterCd": "00060,00065",
                 "statCd": "00003",
                 "startDT": iso_dates[0],
                 "endDT": iso_dates[-1],
@@ -414,16 +424,62 @@ async def get_streamflow_history(
         dv_data = r_dv.json()
 
         dv_by_site: dict[str, dict[str, float | None]] = {}
+        gh_by_site: dict[str, dict[str, float | None]] = {}
         for ts in dv_data.get("value", {}).get("timeSeries", []):
             sid = ts["sourceInfo"]["siteCode"][0]["value"]
-            site_dv: dict[str, float | None] = {}
+            param = ts["variable"]["variableCode"][0]["value"]
+            site_vals: dict[str, float | None] = {}
             for v in ts.get("values", [{}])[0].get("value", []):
                 d = v["dateTime"][:10]
                 try:
-                    site_dv[d] = float(v["value"])
+                    site_vals[d] = float(v["value"])
                 except (TypeError, ValueError):
-                    site_dv[d] = None
-            dv_by_site[sid] = site_dv
+                    site_vals[d] = None
+            if param == "00060":
+                dv_by_site[sid] = site_vals
+            elif param == "00065":
+                gh_by_site[sid] = site_vals
+
+        # Fallback: fetch gage height from instantaneous values (iv)
+        # for gauges that didn't return daily gage height. Many gauges
+        # only publish gage height as 15-min instantaneous readings.
+        iv_url = "https://nwis.waterservices.usgs.gov/nwis/iv/"
+        sites_needing_gh = [
+            g["site_no"]
+            for g in candidates
+            if g["site_no"] not in gh_by_site
+        ]
+        if sites_needing_gh:
+            try:
+                r_iv = await c.get(
+                    iv_url,
+                    params={
+                        "format": "json",
+                        "sites": ",".join(sites_needing_gh),
+                        "parameterCd": "00065",
+                        "startDT": iso_dates[0],
+                        "endDT": iso_dates[-1],
+                        "siteStatus": "all",
+                    },
+                )
+                if r_iv.status_code == 200:
+                    iv_data = r_iv.json()
+                    for ts in iv_data.get("value", {}).get("timeSeries", []):
+                        sid = ts["sourceInfo"]["siteCode"][0]["value"]
+                        # Aggregate 15-min readings to daily max
+                        daily_max: dict[str, float] = {}
+                        for v in ts.get("values", [{}])[0].get("value", []):
+                            d = v["dateTime"][:10]
+                            try:
+                                val = float(v["value"])
+                                if val >= 0:
+                                    daily_max[d] = max(daily_max.get(d, 0), val)
+                            except (TypeError, ValueError):
+                                pass
+                        if daily_max:
+                            gh_by_site[sid] = daily_max
+            except httpx.HTTPError:
+                pass  # IV fallback is best-effort
 
         peak_responses = await asyncio.gather(
             *(
@@ -445,10 +501,12 @@ async def get_streamflow_history(
     for g, peak_resp in zip(candidates, peak_responses):
         sid = g["site_no"]
         site_dv = dv_by_site.get(sid, {})
+        site_gh = gh_by_site.get(sid, {})
         daily_cfs = [site_dv.get(d) for d in iso_dates]
         daily_m3s = [
             round(v * cfs_to_m3s, 2) if v is not None else None for v in daily_cfs
         ]
+        daily_gage_height_ft = [site_gh.get(d) for d in iso_dates]
 
         peaks: list[tuple[str, float]] = []
         if not isinstance(peak_resp, Exception):
@@ -482,6 +540,7 @@ async def get_streamflow_history(
                 "site_no": sid,
                 "name": g["name"],
                 "distance_km": g["distance_km"],
+                "daily_gage_height_ft": daily_gage_height_ft,
                 "daily_cfs": daily_cfs,
                 "daily_m3s": daily_m3s,
                 "event_peak_cfs": event_peak_cfs,
