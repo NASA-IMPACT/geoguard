@@ -44,6 +44,21 @@ EXAMPLES = [
 ]
 
 
+# TIFF prefill: file + bbox + date + region + model + source. Clicking the
+# example fills every TIFF field in one go so users without their own .tif
+# can still demo the InputProcessor flow.
+TIFF_EXAMPLES = [
+    [
+        "data/flood_demo_sacramento.tif",
+        "-121.974, 38.888, -121.579, 39.601",
+        "2023-01-22",
+        "Sacramento Valley, California, USA",
+        "Prithvi-EO",
+        "Sentinel-2",
+    ],
+]
+
+
 # ── Rendering helpers ─────────────────────────────────────────────────
 
 VERDICT_EMOJI = {
@@ -391,6 +406,18 @@ with gr.Blocks(title="GeoGuard — live demo") as demo:
                 tiff_source = gr.Textbox(
                     label="Input source",
                     placeholder="Sentinel-2",
+                )
+                gr.Examples(
+                    examples=TIFF_EXAMPLES,
+                    inputs=[
+                        tiff_upload,
+                        tiff_bbox,
+                        tiff_date,
+                        tiff_region,
+                        tiff_model_name,
+                        tiff_source,
+                    ],
+                    label="TIFF example — click to fill (Sacramento Valley flood, 2023-01-22)",
                 )
 
             run_button = gr.Button("🔎 Verify", variant="primary", size="lg")
