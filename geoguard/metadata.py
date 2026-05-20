@@ -10,7 +10,7 @@ from pydantic import BaseModel, Field, computed_field, model_validator
 from pydantic_ai import Agent
 from pydantic_ai.capabilities import Thinking
 
-from .claims import CLAIM_RULES, DEFAULT_MAX_CLAIMS, Claim
+from .claims import CLAIM_RULES, Claim
 from .config import ReasoningEffort, build_model, settings
 from .schemas import EventType, Input
 
@@ -174,29 +174,23 @@ def _group_cap_rule(max_claims: int | None) -> str:
     )
 
 
-def claim_group_instructions(max_claims: int | None = DEFAULT_MAX_CLAIMS) -> str:
-    return (
-        "Identify each distinct event described in the input. Information that "
-        "shares location, time, and a causal chain describes the SAME event — "
-        "group all such claims under ONE ClaimGroup. Do not create separate "
-        "groups for different aspects of the same event (cause, impact, response).\n\n"
-        "For each event, extract:\n"
-        "1. Structured metadata (event_type, location, time_range, entities, "
-        "and event-specific fields).\n"
-        "2. Atomic, decontextualized claims about it.\n\n"
-        + CLAIM_RULES
-        + "\n\nLimits:\n"
-        + _group_cap_rule(max_claims)
-        + "\n\n"
-        + GEOCODE_RULE
-        + "\n\n"
-        + TIME_RULE
-        + "\n\nSkip opinions, hedges, and meta-commentary. "
-        "Leave any metadata field you cannot confidently extract as None."
-    )
-
-
-CLAIM_GROUP_INSTRUCTIONS = claim_group_instructions()
+CLAIM_GROUP_INSTRUCTIONS = (
+    "Identify each distinct event described in the input. Information that "
+    "shares location, time, and a causal chain describes the SAME event — "
+    "group all such claims under ONE ClaimGroup. Do not create separate "
+    "groups for different aspects of the same event (cause, impact, response).\n\n"
+    "For each event, extract:\n"
+    "1. Structured metadata (event_type, location, time_range, entities, "
+    "and event-specific fields).\n"
+    "2. Atomic, decontextualized claims about it.\n\n"
+    + CLAIM_RULES
+    + "\n\n"
+    + GEOCODE_RULE
+    + "\n\n"
+    + TIME_RULE
+    + "\n\nSkip opinions, hedges, and meta-commentary. "
+    "Leave any metadata field you cannot confidently extract as None."
+)
 
 
 class MetadataExtractor:
@@ -207,9 +201,12 @@ class MetadataExtractor:
         reasoning_effort: ReasoningEffort | None = None,
         instructions: str | None = None,
         output_type=list[Metadata],
-        max_claims: int | None = DEFAULT_MAX_CLAIMS,
+        max_claims: int | None = None,
         geocoder: Callable[[str], Awaitable[dict]] = geocode,
     ):
+        instructions = instructions or DEFAULT_INSTRUCTIONS
+        if max_claims is not None:
+            instructions += f"\n\nLimits:\n{_group_cap_rule(max_claims)}"
         self._agent = Agent(
             model=build_model(model, api_key),
             output_type=output_type,
@@ -217,12 +214,7 @@ class MetadataExtractor:
             capabilities=[
                 Thinking(effort=reasoning_effort or settings.reasoning_effort),
             ],
-            instructions=instructions
-            or (
-                claim_group_instructions(max_claims)
-                if output_type == list[ClaimGroup]
-                else DEFAULT_INSTRUCTIONS
-            ),
+            instructions=instructions,
             output_retries=settings.output_retries,
         )
 

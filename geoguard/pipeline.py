@@ -39,18 +39,21 @@ class GeoGuard:
         api_key: str | None = None,
         reasoning_effort: ReasoningEffort | None = None,
         max_claims: int | None = None,
+        instructions: str | None = None,
         metadata_extractor: MetadataExtractor | None = None,
         tool_selector: ToolSelector | None = None,
         verifier: Verifier | None = None,
         rubricator: Rubricator | None = None,
     ):
-        # Resolve max_claims: explicit arg → settings → hardcoded default
-        _max_claims = max_claims if max_claims is not None else default_settings.max_claims
+        _max_claims = (
+            max_claims if max_claims is not None else default_settings.max_claims
+        )
         self.metadata_extractor = metadata_extractor or MetadataExtractor(
             model=model,
             api_key=api_key,
             reasoning_effort=reasoning_effort,
             output_type=list[ClaimGroup],
+            instructions=instructions or CLAIM_GROUP_INSTRUCTIONS,
             max_claims=_max_claims,
         )
         self.tool_selector = tool_selector or ToolSelector(
@@ -73,6 +76,7 @@ class GeoGuard:
                 api_key=s.api_key,
                 reasoning_effort=s.reasoning_effort,
                 output_type=list[ClaimGroup],
+                instructions=CLAIM_GROUP_INSTRUCTIONS,
                 max_claims=s.max_claims,
             ),
             tool_selector=ToolSelector(
