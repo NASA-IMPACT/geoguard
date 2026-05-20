@@ -23,10 +23,12 @@ def _():
     from geoguard.claims import Claim
     from geoguard.metadata import ClaimGroup
     from geoguard.pipeline import Report
+    from geoguard.schemas import BoundingBox, TiffRef
     from geoguard.tools.selector import SelectedTools
     from geoguard.verifications import Verdict, VerifierResult
 
     return (
+        BoundingBox,
         Claim,
         ClaimGroup,
         GeoGuard,
@@ -34,6 +36,7 @@ def _():
         Report,
         Rubric,
         SelectedTools,
+        TiffRef,
         Verdict,
         VerifierResult,
         tiff_to_claims,
@@ -189,6 +192,9 @@ def _(mo):
 
 @app.cell
 def _(
+    BoundingBox,
+    Input,
+    TiffRef,
     input_tabs,
     mo,
     text_input,
@@ -200,10 +206,17 @@ def _(
     tiff_to_claims,
     tiff_upload,
 ):
-    """Resolve claims text from the active input tab."""
+    """Resolve the active input tab into a pipeline Input.
+
+    Pipeline-level abstraction: in TIFF mode we hand the pipeline a
+    TiffRef and let InputProcessor do the conversion. The local
+    tiff_to_claims call is preview-only (cheap, non-LLM) so the user
+    can see the text that will feed downstream extraction.
+    """
     import tempfile
 
-    _claims_text = ""
+    _pipeline_input = None
+    _preview_text = ""
     _tiff_error = ""
 
     if input_tabs.value == "🛰️ TIFF Upload":
@@ -212,10 +225,25 @@ def _(
                 with tempfile.NamedTemporaryFile(suffix=".tif", delete=False) as _f:
                     _f.write(tiff_upload.value[0].contents)
                     _tiff_path = _f.name
-                _bbox = [float(x.strip()) for x in tiff_bbox.value.split(",")]
-                _claims_text = tiff_to_claims(
+                _b = [float(x.strip()) for x in tiff_bbox.value.split(",")]
+                _bbox = BoundingBox(
+                    lon_min=_b[0], lat_min=_b[1], lon_max=_b[2], lat_max=_b[3]
+                )
+                _pipeline_input = Input(
+                    images=[
+                        TiffRef(
+                            path=_tiff_path,
+                            bbox=_bbox,
+                            date=tiff_date.value.strip(),
+                            region_name=tiff_region.value.strip(),
+                            model_name=tiff_model_name.value.strip(),
+                            input_source=tiff_source.value.strip(),
+                        )
+                    ]
+                )
+                _preview_text = tiff_to_claims(
                     tiff_path=_tiff_path,
-                    bbox=_bbox,
+                    bbox=_b,
                     date=tiff_date.value.strip(),
                     region_name=tiff_region.value.strip(),
                     model_name=tiff_model_name.value.strip(),
@@ -223,12 +251,12 @@ def _(
                 )
             except Exception as e:
                 _tiff_error = str(e)
-        if _claims_text:
+        if _preview_text:
             mo.output.replace(
                 mo.vstack(
                     [
                         mo.md("### Generated claims from TIFF"),
-                        mo.callout(mo.md(_claims_text), kind="info"),
+                        mo.callout(mo.md(_preview_text), kind="info"),
                     ]
                 )
             )
@@ -239,11 +267,12 @@ def _(
         else:
             mo.output.replace(mo.md("_Upload a TIFF file to generate claims._"))
     else:
-        _claims_text = text_input.value
+        if text_input.value:
+            _pipeline_input = Input(text=text_input.value)
         mo.output.replace(mo.md(""))
 
-    claims_text = _claims_text
-    return (claims_text,)
+    pipeline_input = _pipeline_input
+    return (pipeline_input,)
 
 
 @app.cell
@@ -267,7 +296,6 @@ async def _(
     Claim,
     ClaimGroup,
     GeoGuard,
-    Input,
     Report,
     Rubric,
     SelectedTools,
@@ -275,14 +303,14 @@ async def _(
     VERDICT_KIND,
     VerifierResult,
     api_key_input,
-    claims_text,
     mo,
     model_input,
+    pipeline_input,
     reasoning_input,
     run_button,
 ):
     mo.stop(not run_button.value, mo.md("_Click **Verify** to run the pipeline._"))
-    mo.stop(not claims_text, mo.callout(mo.md("**No input.** Enter text or upload a TIFF."), kind="warn"))
+    mo.stop(pipeline_input is None, mo.callout(mo.md("**No input.** Enter text or upload a TIFF."), kind="warn"))
 
     guard = GeoGuard(
         model=model_input.value.strip() or None,
@@ -292,7 +320,7 @@ async def _(
     events = []
 
     with mo.status.spinner(title="Starting pipeline..."):
-        async for item in guard(Input(text=claims_text)):
+        async for item in guard(pipeline_input):
             events.append(item)
 
             if isinstance(item, ClaimGroup):
