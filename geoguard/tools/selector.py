@@ -83,13 +83,7 @@ class ToolSelector:
         )
         result = await self._agent.run(prompt, **run_kwargs)
         chosen = set(result.output.chosen)
-        selected = [c for c in candidates if c.__name__ in chosen]
-
-        # Fallback: if the selector returned no tools but candidates exist,
-        # use all candidates. This prevents silent verification skips when
-        # the model fails to populate the chosen list.
-        if not selected and candidates:
-            selected = candidates
+        selected = [c for c in candidates if c.__name__ in chosen] or candidates
 
         return SelectedTools(
             tools=selected,
