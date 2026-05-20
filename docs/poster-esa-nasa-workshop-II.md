@@ -239,15 +239,54 @@ Adding a new check is a **single async function registered against an event type
 
 ---
 
-## 08 · References & future work
+## 08 · Related work & where GeoGuard fits
 
-**References**
-- *Earth-Agent: Unlocking the Full Landscape of Earth Observation with Agents*
-- *Mitigating Geospatial Knowledge Hallucination in Large Language Models* (GeoHaluBench + DynamicKTO)
-- *Towards LLM Agents for Earth Observation*
-- *Empowering LLM Agents with Geospatial Awareness for Wildfire Response*
+Four lines of work touch the problem GeoGuard targets. Each is necessary background; none is a complete solution to the "audit geo-AI output against authoritative data" problem.
 
-**Future work**
+### General LLM guardrails — safety, not factuality
+
+> **[1]** Rebedea, Dinu, Sreedhar, Parisien, Cohen (2023). *NeMo Guardrails: A Toolkit for Controllable and Safe LLM Applications with Programmable Rails*. EMNLP 2023 (Demo). [arXiv:2310.10501](https://arxiv.org/abs/2310.10501).
+
+→ **Gap:** programmable rails handle topic, safety, dialogue flow, language style. They are domain-blind — no geocoders, no NOAA, no USGS. Toxicity and PII checks don't help when an upstream model claims 100 mm of rain that didn't fall.
+
+### Automated fact-checking — general, web-grounded
+
+> **[2]** Iqbal, Wang, Wang, Georgiev, Geng, Gurevych, Nakov (2024). *OpenFactCheck: A Unified Framework for Factuality Evaluation of LLMs*. EMNLP 2024. [arXiv:2408.11832](https://arxiv.org/abs/2408.11832).
+>
+> **[3]** Xie, Xing, Wang, Geng, Iqbal, Sahnan, Gurevych, Nakov (2025). *FIRE: Fact-checking with Iterative Retrieval and Verification*. NAACL 2025 Findings. [arXiv:2411.00784](https://arxiv.org/abs/2411.00784).
+>
+> **[4]** Trinh, Nguyen, Hy (2025). *Towards Robust Fact-Checking: A Multi-Agent System with Advanced Evidence Retrieval*. arXiv:2506.17878. [Link](https://arxiv.org/abs/2506.17878).
+
+→ **Gap:** the architectures are the right shape — decompose claims, retrieve evidence, verify, score — but the evidence is web text. None grounds verification in authoritative geospatial data (PRISM, MRMS, USGS NWIS, OSM). A news article that mis-states rainfall counts as supporting evidence to these systems.
+
+### Geospatial hallucination — measurement and mitigation
+
+> **[5]** Wang, Feng, Liu, Pei, Li (2025). *Mitigating Geospatial Knowledge Hallucination in Large Language Models: Benchmarking and Dynamic Factuality Aligning*. arXiv:2507.19586. [Link](https://arxiv.org/abs/2507.19586).
+>
+> **[6]** Zhang, Gao, Wei, Zhao, Nie, Chen, Chen, Su, Sun (2025). *GeoAnalystBench: A GeoAI benchmark for assessing large language models for spatial analysis workflow and code generation*. Transactions in GIS 2025. [arXiv:2509.05881](https://arxiv.org/abs/2509.05881).
+
+→ **Gap:** model-side. Either a benchmark for scoring how often LLMs hallucinate geospatial facts, or a fine-tuning method (DynamicKTO) to make them hallucinate less. Neither is a runtime auditor that wraps an unmodified upstream model and audits its output in operation.
+
+### Geospatial AI agents — producers, not validators
+
+> **[7]** opendatalab et al. (2026). *Earth-Agent: Unlocking the Full Landscape of Earth Observation with Agents*. ICLR 2026. [arXiv:2509.23141](https://arxiv.org/abs/2509.23141).
+>
+> **[8]** Luo, Lin, Xu, Wu, Mao, Wang, Feng, Huang, Du (2025). *GeoJSON Agents: A Multi-Agent LLM Architecture for Geospatial Analysis — Function Calling vs Code Generation*. arXiv:2509.08863. [Link](https://arxiv.org/abs/2509.08863).
+>
+> **[9]** Chen, Li, Ma, Hu, Zhu, Deng, Yu (2025). *Empowering LLM Agents with Geospatial Awareness: Toward Grounded Reasoning for Wildfire Response*. arXiv:2510.12061. [Link](https://arxiv.org/abs/2510.12061).
+>
+> **[10]** Sukhorukov et al. (2025). *Hierarchical AI-Meteorologist: LLM-Agent System for Multi-Scale and Explainable Weather Forecast Reporting*. arXiv:2511.23387. [Link](https://arxiv.org/abs/2511.23387).
+
+→ **Gap:** every one of these *produces* geo-AI output — Earth-Observation task results, GeoJSON spatial analyses, wildfire resource allocations, forecast narratives. None *validates* such output. GeoGuard is the layer above them.
+
+### Where GeoGuard fills in
+
+GeoGuard is a **model-agnostic, post-hoc, domain-typed validation layer** that wraps any upstream producer — an LLM, a foundation model, an agent like the four above, or a human — and audits its text output against authoritative geospatial data: gauges, radar+gauge QPE, river streamflow records, place-name registries. It does not modify the upstream model (unlike [5]), does not rely on web text as evidence (unlike [2–4]), is not a benchmark for measuring how good models are (unlike [5, 6]), and is not itself a producer (unlike [7–10]). It is the validator that the four lines above leave unfilled. On an adversarial NOAA Storm Events benchmark, **0% of fabricated events are endorsed** and **92% of real events are not rejected** — see § 06.
+
+---
+
+### Future work
+
 - Real-time disaster catalogs as registered tools — NASA EONET, GDACS, EM-DAT, ReliefWeb
 - Global precipitation archive — NASA GPM IMERG to complement ERA5 outside the US
 - Non-US streamflow / river-gauge equivalents (GloFAS, regional hydromet agencies)
