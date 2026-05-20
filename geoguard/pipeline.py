@@ -14,6 +14,7 @@ from geoguard.metadata import (
     Metadata,
     MetadataExtractor,
 )
+from geoguard.processors import InputProcessor
 from geoguard.rubrics import Rubric, Rubricator
 from geoguard.schemas import Input
 from geoguard.tools.selector import SelectedTools, ToolSelector
@@ -38,17 +39,25 @@ class GeoGuard:
         model: str | None = None,
         api_key: str | None = None,
         reasoning_effort: ReasoningEffort | None = None,
+        max_claims: int | None = None,
+        instructions: str | None = None,
+        input_processor: InputProcessor | None = None,
         metadata_extractor: MetadataExtractor | None = None,
         tool_selector: ToolSelector | None = None,
         verifier: Verifier | None = None,
         rubricator: Rubricator | None = None,
     ):
+        _max_claims = (
+            max_claims if max_claims is not None else default_settings.max_claims
+        )
+        self.input_processor = input_processor or InputProcessor()
         self.metadata_extractor = metadata_extractor or MetadataExtractor(
             model=model,
             api_key=api_key,
             reasoning_effort=reasoning_effort,
             output_type=list[ClaimGroup],
-            instructions=CLAIM_GROUP_INSTRUCTIONS,
+            instructions=instructions or CLAIM_GROUP_INSTRUCTIONS,
+            max_claims=_max_claims,
         )
         self.tool_selector = tool_selector or ToolSelector(
             model=model, api_key=api_key, reasoning_effort=reasoning_effort
@@ -65,11 +74,13 @@ class GeoGuard:
         """Build a GeoGuard with every block driven by Settings (env / .env)."""
         s = settings or default_settings
         return cls(
+            input_processor=InputProcessor(),
             metadata_extractor=MetadataExtractor(
                 model=s.model,
                 api_key=s.api_key,
                 reasoning_effort=s.reasoning_effort,
                 output_type=list[ClaimGroup],
+                instructions=CLAIM_GROUP_INSTRUCTIONS,
                 max_claims=s.max_claims,
             ),
             tool_selector=ToolSelector(
@@ -109,6 +120,7 @@ class GeoGuard:
 
         Per-claim sub-pipelines run concurrently within each group.
         """
+        inp = await self.input_processor(inp)
         groups = await self.metadata_extractor(inp)
         verifications: list[VerifierResult] = []
         SENTINEL: object = object()
@@ -164,10 +176,19 @@ class GeoGuard:
 
 
 def _roll_up(verdicts: list[Verdict]) -> Verdict:
+    """Aggregate per-claim verdicts into a single event-level verdict.
+
+    Rules (applied in order):
+    1. Any CONTRADICTS → overall CONTRADICTS  (safety-first)
+    2. At least one SUPPORTS and no CONTRADICTS → overall SUPPORTS
+       (INCONCLUSIVE claims simply mean "no data" — they don't negate
+       positive evidence from other claims)
+    3. All INCONCLUSIVE → INCONCLUSIVE
+    """
     if not verdicts:
         return Verdict.INCONCLUSIVE
     if Verdict.CONTRADICTS in verdicts:
         return Verdict.CONTRADICTS
-    if all(v == Verdict.SUPPORTS for v in verdicts):
+    if Verdict.SUPPORTS in verdicts:
         return Verdict.SUPPORTS
     return Verdict.INCONCLUSIVE

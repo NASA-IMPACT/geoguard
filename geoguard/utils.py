@@ -8,14 +8,27 @@ from typing import Any
 import httpx
 
 
+def _parse_date(val: str | date) -> date:
+    """Parse a date from a string or return a date object unchanged.
+
+    Handles both 'YYYY-MM-DD' and ISO datetime strings with a time
+    component (e.g. '2024-09-26T13:00:00') that LLMs sometimes produce.
+    """
+    if isinstance(val, date):
+        return val
+    # Strip any time component — take only the date part
+    return date.fromisoformat(val[:10])
+
+
 def date_range(start: str | date, end: str | date) -> list[date]:
     """Inclusive list of dates between start and end.
 
-    Accepts ISO strings (YYYY-MM-DD) or `date` objects for either bound.
+    Accepts ISO strings (YYYY-MM-DD), ISO datetime strings
+    (YYYY-MM-DDTHH:MM:SS), or `date` objects for either bound.
     Returns an empty list if `end` is before `start`.
     """
-    s = date.fromisoformat(start) if isinstance(start, str) else start
-    e = date.fromisoformat(end) if isinstance(end, str) else end
+    s = _parse_date(start)
+    e = _parse_date(end)
     return [s + timedelta(days=i) for i in range((e - s).days + 1)]
 
 

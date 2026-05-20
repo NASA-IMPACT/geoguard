@@ -235,7 +235,6 @@ temp/
 *.bmp
 *.svg
 *.webp
-*.tif
 *.tiff
 *.ico
 *.txt

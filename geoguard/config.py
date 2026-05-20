@@ -43,6 +43,17 @@ class Settings(BaseSettings):
     # UsageLimitExceeded) rather than producing a partial verdict.
     verification_tool_usage_limit: int | None = Field(default=None, gt=0)
 
+    # Max LLM API requests per claim verification — runaway-loop guard,
+    # not a budget. A normal run is 5-20 requests; 100 is generous
+    # headroom. None = unlimited. Hitting it raises pydantic-ai's
+    # UsageLimitExceeded.
+    verification_request_limit: int | None = Field(default=100, gt=0)
+
+    # Pydantic-ai output-validation retries (applies to MetadataExtractor
+    # and Verifier agents). Number of times the agent is re-prompted when
+    # its structured output fails validation before giving up.
+    output_retries: int = Field(default=2, ge=0)
+
 
 settings = Settings()
 
