@@ -11,12 +11,14 @@ import gradio as gr
 
 # Side-effect imports register tools with @registry on import.
 import geoguard.tools.geospatial  # noqa: F401
+import geoguard.tools.satellite  # noqa: F401  MODIS — gracefully skips without Earthdata creds
 import geoguard.tools.weather  # noqa: F401
 from geoguard import GeoGuard, Input
 from geoguard.claims import Claim
 from geoguard.metadata import ClaimGroup
 from geoguard.pipeline import Report
 from geoguard.rubrics import Rubric
+from geoguard.schemas import BoundingBox, ImageRef, TiffRef
 from geoguard.tools.selector import SelectedTools
 from geoguard.verifications import Verdict, VerifierResult
 
@@ -196,14 +198,34 @@ PROVIDER_ENV = {
 }
 
 
-def precheck(text: str, model: str, api_key: str) -> str | None:
+def precheck(
+    text: str,
+    tiff_path: str | None,
+    tiff_bbox: str,
+    tiff_date: str,
+    model: str,
+    api_key: str,
+) -> str | None:
     """Return an error message string if the request would fail trivially.
 
     Catches blank input / blank-key-with-no-env so users get a clear
     message instantly instead of waiting on a half-run pipeline.
     """
-    if not text.strip():
-        return "Please paste a claim or paragraph to verify."
+    if not text.strip() and not tiff_path:
+        return "Please paste a claim, upload a TIFF, or both."
+    if tiff_path:
+        if not tiff_bbox.strip():
+            return (
+                "TIFF uploaded but no bounding box provided (west, south, east, north)."
+            )
+        if not tiff_date.strip():
+            return "TIFF uploaded but no event date provided (YYYY-MM-DD)."
+        try:
+            parts = [float(x.strip()) for x in tiff_bbox.split(",")]
+            if len(parts) != 4:
+                raise ValueError
+        except ValueError:
+            return "Bounding box must be 4 comma-separated numbers: west, south, east, north."
     if not model.strip():
         return "Please provide a model (e.g. `openai:gpt-5.2`)."
     if ":" not in model:
@@ -223,6 +245,40 @@ def precheck(text: str, model: str, api_key: str) -> str | None:
             f"or ask the Space owner to set `{env_var}`."
         )
     return None
+
+
+def build_input(
+    text: str,
+    tiff_path: str | None,
+    tiff_bbox: str,
+    tiff_date: str,
+    tiff_region: str,
+    tiff_model_name: str,
+    tiff_source: str,
+) -> Input:
+    """Build a pipeline Input from the form fields.
+
+    Text-only, TIFF-only, or both are all valid. The pipeline's
+    InputProcessor runs tiff_to_claims and appends its output to text
+    before metadata extraction.
+    """
+    images: list[ImageRef | TiffRef] = []
+    if tiff_path:
+        parts = [float(x.strip()) for x in tiff_bbox.split(",")]
+        bbox = BoundingBox(
+            lon_min=parts[0], lat_min=parts[1], lon_max=parts[2], lat_max=parts[3]
+        )
+        images.append(
+            TiffRef(
+                path=tiff_path,
+                bbox=bbox,
+                date=tiff_date.strip(),
+                region_name=tiff_region.strip() or "the study area",
+                model_name=tiff_model_name.strip() or "a foundation model",
+                input_source=tiff_source.strip() or "satellite imagery",
+            )
+        )
+    return Input(text=text.strip(), images=images)
 
 
 def friendly_error(exc: Exception) -> str:
@@ -270,6 +326,33 @@ with gr.Blocks(title="GeoGuard — live demo") as demo:
                 value="medium",
                 label="Reasoning effort",
             )
+
+            with gr.Accordion("🛰️ NASA Earthdata credentials (optional)", open=False):
+                gr.Markdown(
+                    "_Required only for the MODIS satellite flood tool. "
+                    "Without these, that tool is skipped gracefully and the "
+                    "verifier proceeds with precipitation + streamflow evidence. "
+                    "Register at "
+                    "[urs.earthdata.nasa.gov](https://urs.earthdata.nasa.gov/users/new)._"
+                )
+                earthdata_username = gr.Textbox(
+                    value="",
+                    label="EARTHDATA_USERNAME",
+                    placeholder="your Earthdata username",
+                )
+                earthdata_password = gr.Textbox(
+                    value="",
+                    label="EARTHDATA_PASSWORD",
+                    type="password",
+                    placeholder="your Earthdata password (not stored)",
+                )
+                laads_app_key = gr.Textbox(
+                    value="",
+                    label="LAADS_APP_KEY (optional — for historical MODIS data >7d old)",
+                    type="password",
+                    placeholder="ladsweb.modaps.eosdis.nasa.gov/profiles",
+                )
+
             gr.Markdown("### 📝 Input")
             text_input = gr.Textbox(
                 value=EXAMPLES[0][0],
@@ -277,6 +360,39 @@ with gr.Blocks(title="GeoGuard — live demo") as demo:
                 lines=8,
                 max_lines=20,
             )
+
+            with gr.Accordion("🛰️ Optional: upload a flood-mask TIFF", open=False):
+                gr.Markdown(
+                    "_Pixels: 0=dry, 1=flood, 255=nodata. "
+                    "The pipeline will derive verifiable claims from the mask "
+                    "and merge them with your text._"
+                )
+                tiff_upload = gr.File(
+                    label="Flood-mask TIFF (.tif)",
+                    file_types=[".tif", ".tiff"],
+                    type="filepath",
+                )
+                tiff_bbox = gr.Textbox(
+                    label="Bounding box (west, south, east, north)",
+                    placeholder="-122.172, 38.175, -121.381, 39.601",
+                )
+                tiff_date = gr.Textbox(
+                    label="Event date (YYYY-MM-DD)",
+                    placeholder="2023-01-22",
+                )
+                tiff_region = gr.Textbox(
+                    label="Region name",
+                    placeholder="Sacramento Valley, California, USA",
+                )
+                tiff_model_name = gr.Textbox(
+                    label="Model name",
+                    placeholder="Prithvi-EO",
+                )
+                tiff_source = gr.Textbox(
+                    label="Input source",
+                    placeholder="Sentinel-2",
+                )
+
             run_button = gr.Button("🔎 Verify", variant="primary", size="lg")
             gr.Examples(
                 examples=EXAMPLES,
@@ -303,11 +419,42 @@ with gr.Blocks(title="GeoGuard — live demo") as demo:
             final_md = gr.Markdown()
 
     # ── Streaming handler (closes over component refs above) ──
-    async def verify(text, model, api_key, reasoning):
+    async def verify(
+        text,
+        model,
+        api_key,
+        reasoning,
+        earthdata_user,
+        earthdata_pass,
+        laads_key,
+        tiff_file,
+        tiff_bbox_str,
+        tiff_date_str,
+        tiff_region_str,
+        tiff_model_name_str,
+        tiff_source_str,
+    ):
         # Cheap pre-flight check before consuming any API quota.
-        if err := precheck(text or "", model or "", api_key or ""):
+        if err := precheck(
+            text or "",
+            tiff_file,
+            tiff_bbox_str or "",
+            tiff_date_str or "",
+            model or "",
+            api_key or "",
+        ):
             yield {stage_md: f"❌ {err}"}
             return
+
+        # Push Earthdata creds into the process env so the MODIS tool can
+        # pick them up. The tool reads os.environ at call time. We only
+        # set them when non-blank — otherwise let any pre-set values stand.
+        if earthdata_user and earthdata_user.strip():
+            os.environ["EARTHDATA_USERNAME"] = earthdata_user.strip()
+        if earthdata_pass and earthdata_pass.strip():
+            os.environ["EARTHDATA_PASSWORD"] = earthdata_pass.strip()
+        if laads_key and laads_key.strip():
+            os.environ["LAADS_APP_KEY"] = laads_key.strip()
 
         # Reset state at the start of every run
         yield {
@@ -329,12 +476,22 @@ with gr.Blocks(title="GeoGuard — live demo") as demo:
             reasoning_effort=reasoning,
         )
 
+        inp = build_input(
+            text=text or "",
+            tiff_path=tiff_file,
+            tiff_bbox=tiff_bbox_str or "",
+            tiff_date=tiff_date_str or "",
+            tiff_region=tiff_region_str or "",
+            tiff_model_name=tiff_model_name_str or "",
+            tiff_source=tiff_source_str or "",
+        )
+
         claims_text = ""
         tools_text = ""
         verify_text = ""
 
         try:
-            async for item in guard(Input(text=text)):
+            async for item in guard(inp):
                 if isinstance(item, ClaimGroup):
                     claims_text += render_claim_group(item)
                     yield {claims_md: claims_text}
@@ -375,7 +532,21 @@ with gr.Blocks(title="GeoGuard — live demo") as demo:
 
     run_button.click(
         fn=verify,
-        inputs=[text_input, model_input, api_key_input, reasoning_input],
+        inputs=[
+            text_input,
+            model_input,
+            api_key_input,
+            reasoning_input,
+            earthdata_username,
+            earthdata_password,
+            laads_app_key,
+            tiff_upload,
+            tiff_bbox,
+            tiff_date,
+            tiff_region,
+            tiff_model_name,
+            tiff_source,
+        ],
         outputs=[
             stage_md,
             claims_acc,
