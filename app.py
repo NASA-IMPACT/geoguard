@@ -296,6 +296,44 @@ def build_input(
     return Input(text=text.strip(), images=images)
 
 
+# Class label → RGB. Covers both binary (0/1/255) and 5-level Prithvi-EO
+# (0/1/2/3/255) schemes. Anything outside falls through to black.
+_TIFF_PALETTE = {
+    0: (255, 255, 255),  # no_water / dry
+    1: (30, 100, 200),  # reference_water (5-level) or flood (binary)
+    2: (60, 130, 220),  # recurring_flood
+    3: (10, 50, 150),  # flood
+    255: (200, 200, 200),  # no_data
+}
+
+
+def tiff_to_preview(path: str | None):
+    """Render a flood-mask GeoTIFF as a small colormapped preview.
+
+    Returns a PIL Image suitable for `gr.Image`, or None when the file
+    picker has been cleared. Resizes the long side to ≤ 600 px with
+    nearest-neighbour to keep class boundaries crisp.
+    """
+    if not path:
+        return None
+    import numpy as np
+    import tifffile
+    from PIL import Image
+
+    arr = tifffile.imread(path)
+    h, w = arr.shape[:2]
+    rgb = np.zeros((h, w, 3), dtype=np.uint8)
+    for value, color in _TIFF_PALETTE.items():
+        rgb[arr == value] = color
+
+    img = Image.fromarray(rgb)
+    max_side = 600
+    if max(h, w) > max_side:
+        scale = max_side / max(h, w)
+        img = img.resize((int(w * scale), int(h * scale)), Image.Resampling.NEAREST)
+    return img
+
+
 def friendly_error(exc: Exception) -> str:
     """Translate pydantic-ai exceptions into user-readable messages."""
     name = type(exc).__name__
@@ -386,6 +424,11 @@ with gr.Blocks(title="GeoGuard — live demo") as demo:
                     label="Flood-mask TIFF (.tif)",
                     file_types=[".tif", ".tiff"],
                     type="filepath",
+                )
+                tiff_preview = gr.Image(
+                    label="Preview (blue=flood, gray=no_data)",
+                    interactive=False,
+                    height=320,
                 )
                 tiff_bbox = gr.Textbox(
                     label="Bounding box (west, south, east, north)",
@@ -556,6 +599,14 @@ with gr.Blocks(title="GeoGuard — live demo") as demo:
                     }
         except Exception as e:
             yield {stage_md: friendly_error(e)}
+
+    # Live colormapped preview whenever the file picker changes — also
+    # fires when the gr.Examples row fills the upload field.
+    tiff_upload.change(
+        fn=tiff_to_preview,
+        inputs=[tiff_upload],
+        outputs=[tiff_preview],
+    )
 
     run_button.click(
         fn=verify,
