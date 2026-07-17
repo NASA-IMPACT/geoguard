@@ -1,3 +1,4 @@
+import json
 from dataclasses import dataclass
 from enum import StrEnum
 from typing import Any, Callable
@@ -147,9 +148,42 @@ DEFAULT_INSTRUCTIONS = (
 )
 
 
+def _canonical_args(args: str) -> str:
+    """Normalize a tool call's JSON args so formatting variance doesn't defeat dedup.
+
+    The same logical call is serialized inconsistently across emissions: the
+    first tool call in a turn arrives as the model's raw argument string (with
+    spaces, e.g. ``{"lat": 1, "lon": 2}``) while later ones are normalized
+    compact (``{"lat":1,"lon":2}``). Raw-string comparison would treat those
+    as distinct. Canonicalizing (parse + re-dump with sorted keys) collapses
+    them. Falls back to the raw string when args aren't valid JSON.
+    """
+    try:
+        return json.dumps(json.loads(args), sort_keys=True)
+    except (ValueError, TypeError):
+        return args
+
+
 def _extract_tool_calls(messages) -> list[ToolCall]:
+    """Pair tool calls with their returns, in call order, collapsing duplicates.
+
+    A verifier LLM routinely emits the same ``(tool, args)`` call many times in
+    one run. pydantic-ai records each emission separately, and the tool-layer
+    dedup cache (see ``ToolRegistry.build_toolset``) already short-circuits the
+    redundant network request — returning an identical payload every time.
+    Recording every emission anyway balloons this result, and everything built
+    from it (the rubricator prompt, the MCP wrapper's response), with redundant
+    copies of large evidence payloads — the main driver of context overload
+    downstream.
+
+    Deduping by ``(name, canonical_args)`` and keeping the first occurrence is
+    lossless: identical calls are guaranteed to carry identical results. Calls
+    with genuinely different args (e.g. a narrower date window) have a distinct
+    key and are preserved.
+    """
     pending: dict[str, tuple[str, str]] = {}
     calls: list[ToolCall] = []
+    seen: set[tuple[str, str]] = set()
     for msg in messages:
         for part in getattr(msg, "parts", []):
             if isinstance(part, ToolCallPart):
@@ -163,6 +197,10 @@ def _extract_tool_calls(messages) -> list[ToolCall]:
                 key = part.tool_call_id
                 if key in pending:
                     name, args = pending.pop(key)
+                    dedup_key = (name, _canonical_args(args))
+                    if dedup_key in seen:
+                        continue  # exact duplicate — identical result, drop it
+                    seen.add(dedup_key)
                     calls.append(ToolCall(name=name, args=args, result=part.content))
     return calls
 
