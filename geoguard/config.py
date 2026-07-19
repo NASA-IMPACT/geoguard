@@ -36,6 +36,22 @@ class Settings(BaseSettings):
     # HTTP timeout (seconds) — used by tools that make external API calls.
     http_timeout_seconds: float = 30.0
 
+    # NASA VEDA endpoints — the public deployment by default; override
+    # (GEOGUARD_VEDA_STAC_URL / GEOGUARD_VEDA_RASTER_URL) for staging or a
+    # private deployment. The raster URL is the titiler API that computes
+    # zonal statistics server-side, so no raster ever needs downloading.
+    veda_stac_url: str = "https://openveda.cloud/api/stac"
+    veda_raster_url: str = "https://openveda.cloud/api/raster"
+
+    # STAC exploration sub-agent budget. The sub-agent runs nested inside a
+    # single verifier tool call, so its cost multiplies the verifier's —
+    # these caps are mandatory, not optional (None is deliberately not
+    # allowed here, unlike the verifier's limits). Hitting either limit is
+    # handled gracefully: the sub-agent returns a partial "no usable
+    # evidence" summary instead of killing the verification.
+    stac_agent_request_limit: int = Field(default=12, gt=0)
+    stac_agent_tool_calls_limit: int = Field(default=8, gt=0)
+
     # Max tool calls per claim verification. None (default) = no cap.
     # Set to a positive int (e.g. 15) to bound the verifier's tool-use
     # budget when over-sampling becomes a problem. Hitting the limit
