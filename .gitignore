@@ -243,3 +243,12 @@ temp/
 .agents/
 .claude/
 skills-lock.json
+
+# Issue-drafting buffers (edited locally, filed via gh)
+docs/issues/
+
+# Pipeline run artifacts (scripts/run_demo.py, benchmarks)
+output/
+
+# macOS noise
+.DS_Store
