@@ -208,7 +208,7 @@ class MetadataExtractor:
                 Thinking(effort=reasoning_effort or settings.reasoning_effort),
             ],
             instructions=instructions,
-            output_retries=settings.output_retries,
+            retries={"output": settings.output_retries},
         )
 
     async def __call__(self, inp: Input) -> list[Metadata]:

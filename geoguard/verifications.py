@@ -218,7 +218,9 @@ class Verifier:
         **agent_kwargs,
     ):
         self._model = build_model(model, api_key)
-        self._reasoning_effort = reasoning_effort or settings.reasoning_effort
+        self._reasoning_effort: ReasoningEffort = (
+            reasoning_effort or settings.reasoning_effort
+        )
         self._instructions = instructions or DEFAULT_INSTRUCTIONS
         self._tool_calls_limit = (
             tool_calls_limit
@@ -249,7 +251,7 @@ class Verifier:
             toolsets=toolsets,
             capabilities=[Thinking(effort=self._reasoning_effort)],
             instructions=self._instructions,
-            output_retries=self._output_retries,
+            retries={"output": self._output_retries},
             **self._agent_kwargs,
         )
         tool_names = [t.__name__ for t in tools] if tools else []

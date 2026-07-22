@@ -173,7 +173,9 @@ class StacExplorer:
                 "endpoints would be silently ignored"
             )
         self._model = build_model(model, model_api_key)
-        self._reasoning_effort = reasoning_effort or settings.reasoning_effort
+        self._reasoning_effort: ReasoningEffort = (
+            reasoning_effort or settings.reasoning_effort
+        )
         self._request_limit = (
             request_limit
             if request_limit is not None
@@ -211,7 +213,7 @@ class StacExplorer:
             toolsets=[toolset],
             capabilities=[Thinking(effort=self._reasoning_effort)],
             instructions=self._instructions,
-            output_retries=self._output_retries,
+            retries={"output": self._output_retries},
             **self._agent_kwargs,
         )
         try:
