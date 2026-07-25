@@ -8,6 +8,7 @@ from geoguard.utils import graceful_http
 
 
 @registry(EventType.FLOOD, EventType.STORM)
+@graceful_http
 async def get_elevation(lat: float, lon: float) -> dict:
     """Look up elevation in meters above sea level at the given coordinates.
 

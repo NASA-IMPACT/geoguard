@@ -11,6 +11,7 @@ from geoguard.utils import date_range, graceful_http
 
 
 @registry(EventType.FLOOD, EventType.STORM)
+@graceful_http
 async def get_historical_precipitation(
     lat: float,
     lon: float,
@@ -78,6 +79,7 @@ async def get_historical_precipitation(
 
 
 @registry(EventType.FLOOD, EventType.STORM)
+@graceful_http
 async def get_historical_winds(
     lat: float,
     lon: float,
@@ -445,9 +447,7 @@ async def get_streamflow_history(
         # only publish gage height as 15-min instantaneous readings.
         iv_url = "https://nwis.waterservices.usgs.gov/nwis/iv/"
         sites_needing_gh = [
-            g["site_no"]
-            for g in candidates
-            if g["site_no"] not in gh_by_site
+            g["site_no"] for g in candidates if g["site_no"] not in gh_by_site
         ]
         if sites_needing_gh:
             try:
