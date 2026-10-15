@@ -8,11 +8,11 @@ from typing import Callable
 from loguru import logger
 from pydantic_ai.toolsets import FunctionToolset
 
-from geoguard.schemas import EventType
+from geoguard.schemas import EventType, Region, region_contains
 
 
 class ToolRegistry:
-    """Singleton registry of tools tagged by event type.
+    """Singleton registry of tools tagged by event type and coverage region.
 
     Always returns the same instance — `ToolRegistry()` is idempotent.
     Use `ToolRegistry.clear()` in tests to clear state for isolation.
@@ -24,6 +24,7 @@ class ToolRegistry:
         if cls._instance is None:
             instance = super().__new__(cls)
             instance._tools = defaultdict(list)
+            instance._coverage = {}
             cls._instance = instance
         return cls._instance
 
@@ -36,9 +37,14 @@ class ToolRegistry:
         """
         if cls._instance is not None:
             cls._instance._tools.clear()
+            cls._instance._coverage.clear()
 
-    def register(self, *event_types: EventType):
+    def register(self, *event_types: EventType, coverage: Region = Region.GLOBAL):
         """Decorator: register a tool callable under one or more event types.
+
+        `coverage` is the region the tool's data source covers (e.g. USGS
+        gauges: Region.US). Candidates are filtered by it, so a claim in
+        Spain is never routed to a US-only source.
 
         Supports multi-event in one call AND stacking — both forms work:
 
@@ -53,6 +59,7 @@ class ToolRegistry:
         """
 
         def deco(fn):
+            self._coverage[fn.__name__] = coverage
             for et in event_types:
                 self._tools[et] = [
                     t for t in self._tools[et] if t.__name__ != fn.__name__
@@ -62,20 +69,34 @@ class ToolRegistry:
 
         return deco
 
-    def __call__(self, *event_types: EventType):
-        return self.register(*event_types)
+    def __call__(self, *event_types: EventType, coverage: Region = Region.GLOBAL):
+        return self.register(*event_types, coverage=coverage)
 
-    def get_candidates(self, event_type: EventType) -> list[Callable]:
+    def coverage_of(self, fn: Callable) -> Region:
+        return self._coverage.get(fn.__name__, Region.GLOBAL)
+
+    def get_candidates(
+        self,
+        event_type: EventType,
+        lat: float | None = None,
+        lon: float | None = None,
+    ) -> list[Callable]:
         """Candidates for this event type + always-on (OTHER) tools.
 
         Tools registered under multiple event types appear once. Falls back
-        to ALL registered tools when nothing matches.
+        to ALL registered tools when nothing matches. When the claim's
+        location is known, tools whose coverage region excludes it are
+        dropped.
         """
         matched = list(self._tools.get(event_type, []))
         if event_type is not EventType.OTHER:
             matched.extend(self._tools.get(EventType.OTHER, []))
         if not matched:
             matched = [fn for fns in self._tools.values() for fn in fns]
+        if lat is not None and lon is not None:
+            matched = [
+                fn for fn in matched if region_contains(self.coverage_of(fn), lat, lon)
+            ]
         return list({fn.__name__: fn for fn in matched}.values())
 
     def build_toolset(

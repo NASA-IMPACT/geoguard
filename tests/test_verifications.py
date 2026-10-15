@@ -11,14 +11,24 @@ Runnable two ways:
     uv run pytest tests/test_verifications.py      # if pytest is installed
 """
 
+import asyncio
+
 from pydantic_ai.messages import (
     ModelRequest,
     ModelResponse,
     ToolCallPart,
     ToolReturnPart,
 )
+from pydantic_ai.models.function import AgentInfo, FunctionModel
 
-from geoguard.verifications import _canonical_args, _extract_tool_calls
+from geoguard.claims import Claim
+from geoguard.metadata import FloodMetadata
+from geoguard.verifications import (
+    Verdict,
+    Verifier,
+    _canonical_args,
+    _extract_tool_calls,
+)
 
 # Identical full-year args serialized the two ways a provider emits them:
 # the first tool call in a turn keeps the model's spacing, later ones compact.
@@ -104,6 +114,42 @@ def test_canonical_args_ignores_whitespace_and_key_order():
 
 def test_canonical_args_falls_back_on_non_json():
     assert _canonical_args("not json") == "not json"
+
+
+def _answer_without_tools(verdict: str) -> FunctionModel:
+    """A model that skips every tool and renders `verdict` straight away."""
+
+    def respond(messages, info: AgentInfo) -> ModelResponse:
+        out = info.output_tools[0]
+        args = {
+            "claim": {"claim": "A flood occurred in Kankakee, Illinois."},
+            "metadata": {"event_type": "flood"},
+            "verdict": verdict,
+            "rationale": "The metadata says it was a flood.",
+        }
+        return ModelResponse(parts=[ToolCallPart(tool_name=out.name, args=args)])
+
+    return FunctionModel(respond)
+
+
+def _verify_without_tools(verdict: str):
+    verifier = Verifier()
+    verifier._model = _answer_without_tools(verdict)
+    claim = Claim(claim="A flood occurred in Kankakee, Illinois.")
+    return asyncio.run(verifier(claim, FloodMetadata(), tools=[]))
+
+
+def test_ungrounded_supports_is_downgraded_to_inconclusive():
+    result = _verify_without_tools("supports")
+    assert result.tool_calls == []
+    assert result.verification.verdict is Verdict.INCONCLUSIVE
+    assert "No tool evidence" in result.verification.rationale
+
+
+def test_ungrounded_inconclusive_is_left_alone():
+    result = _verify_without_tools("inconclusive")
+    assert result.verification.verdict is Verdict.INCONCLUSIVE
+    assert result.verification.rationale == "The metadata says it was a flood."
 
 
 if __name__ == "__main__":

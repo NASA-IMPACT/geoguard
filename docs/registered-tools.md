@@ -1,6 +1,6 @@
 # Registered tools
 
-This is the catalog of tools currently registered in GeoGuard's verification toolkit. Each tool is an async function decorated with `@registry(EventType.X, ...)` declaring which event types it serves. The tool selector LLM reads each tool's signature and docstring at runtime to decide which to attach to a given claim's verifier agent.
+This is the catalog of tools currently registered in GeoGuard's verification toolkit. Each tool is an async function decorated with `@registry(EventType.X, ..., coverage=Region.Y)` declaring which event types it serves and which region its data covers (`GLOBAL` by default, or `US` / `EUROPE`). Candidates are prefiltered by event type **and** by whether the claim's geocoded location falls inside the tool's coverage region, so a claim in Spain is never routed to a US-only source. The tool selector LLM reads each tool's signature and docstring at runtime to decide which to attach to a given claim's verifier agent.
 
 For the architectural treatment of the registry pattern, see [`architecture.md`](architecture.md). For a narrative explainer aimed at ML/NLP folks, see [`tools-explained.md`](tools-explained.md).
 
@@ -17,6 +17,26 @@ For the architectural treatment of the registry pattern, see [`architecture.md`]
 | 5 | `get_streamflow_history` | USGS NWIS | US only | River discharge (cfs + m³/s) + annual peak records | Daily means ≠ instantaneous peaks — don't compare across types |
 | 6 | `get_elevation` | Open-Meteo / SRTM-90m | Global, ~90 m | Meters above sea level | Returns 0 over water; canopy/buildings inflate it |
 | 7 | `find_nearest_water_body` | OpenStreetMap Overpass | Global (quality varies) | Nearest river/stream/lake/coastline | Volunteer-mapped — some features unnamed, sparse in some regions |
+| 8 | `get_river_discharge_glofas` | Copernicus GloFAS v4 via Open-Meteo Flood API | Global, ~5 km | Daily river discharge + rank of the peak among 20 years of annual maxima | Model-simulated: trust relative magnitude (rank, × median) over exact m³/s |
+| 9 | `get_station_observations` | Meteostat (national weather-service stations) | Global, sparse | Gauge rainfall + MEASURED wind gusts | Localized rain can miss every station — low reading ≠ contradiction |
+| 10 | `get_european_river_gauges` | Hub'Eau (France) · Environment Agency (UK) | Europe (FR, UK) | Measured daily mean discharge | Other countries return `found: false` → use #8 |
+| 11 | `search_gdacs_events` | GDACS archive (UN / EC JRC) | Global | A flood / cyclone was recorded here, then | Catalog silence is not evidence of absence |
+| 12 | `get_current_gdacs_alerts` | GDACS via the EO MCP tools server | Global, live | Disasters being tracked right now | Registered only when `GEOGUARD_GDACS_MCP_TOKEN` is set |
+
+### US ↔ Europe counterparts
+
+| Evidence | United States | Europe |
+|---|---|---|
+| Rain gauges / radar | NOAA PRISM + MRMS (#3) | Meteostat station gauges — AEMET, DWD, Météo-France, Met Office (#9) |
+| Measured river gauges | USGS NWIS (#5) | Hub'Eau France, Environment Agency UK (#10) |
+| River discharge, multi-year rank | GloFAS (#8) | Copernicus GloFAS (#8) |
+| Measured wind gusts | Meteostat / NOAA ISD (#9) | Meteostat (#9) |
+| Reanalysis rain + wind | ERA5 (#2, #4) | ERA5 (#2, #4) |
+| Satellite flood extent | MODIS MCDWD | MODIS MCDWD |
+| Disaster catalog | GDACS (#11, #12) | GDACS (#11, #12) |
+| Place, terrain, hydrography | Nominatim, SRTM, Overpass (#1, #6, #7) | same |
+
+Next European sources: EUMETNET OPERA radar composite (counterpart to MRMS) and Copernicus EFAS (needs a CDS account).
 
 ---
 
@@ -26,12 +46,13 @@ What's verifiable today, broken down by event type and geography:
 
 | | Rainfall amount | Wind speed | River flooding | Storm surge | Location context |
 |---|---|---|---|---|---|
-| **US · STORM** | #3 preferred → #2 fallback | #4 | #5 | gap (future) | #6 + #7 |
-| **US · FLOOD** | #3 preferred → #2 fallback | #4 (peripheral) | #5 | n/a | #6 + #7 |
-| **Outside US · STORM** | #2 only | #4 | gap | gap (future) | #6 + #7 |
-| **Outside US · FLOOD** | #2 only | #4 (peripheral) | gap | n/a | #6 + #7 |
+| **US · STORM** | #3 → #9 → #2 | #9 measured, #4 | #5, #8 | gap (future) | #6 + #7 |
+| **US · FLOOD** | #3 → #9 → #2 | #4 (peripheral) | #5, #8 | n/a | #6 + #7 |
+| **Europe · STORM** | #9 → #2 | #9 measured, #4 | #10 (FR, UK), #8 | gap (future) | #6 + #7 |
+| **Europe · FLOOD** | #9 → #2 | #4 (peripheral) | #10 (FR, UK), #8 | n/a | #6 + #7 |
+| **Rest of world** | #9 → #2 | #9, #4 | #8 | gap (future) | #6 + #7 |
 
-Gaps are the honest scope limitations called out on the poster: storm surge worldwide, river flooding outside the US.
+Remaining gaps: storm surge everywhere, measured river gauges in European countries other than France and the UK (GloFAS covers them, model-based), radar rainfall outside the US.
 
 ---
 

@@ -1,6 +1,6 @@
 from typing import Literal
 
-from pydantic import Field
+from pydantic import AliasChoices, Field
 from pydantic_ai.models import Model, infer_model, infer_provider_class
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -70,6 +70,28 @@ class Settings(BaseSettings):
     # its structured output fails validation before giving up.
     output_retries: int = Field(default=2, ge=0)
 
+    # `claude-cli:<model>` backend (see geoguard/claude_cli.py) — runs every
+    # agent through the local `claude` CLI. Concurrency caps simultaneous CLI
+    # processes across ALL agents in the process; keep it modest so a large
+    # benchmark stays inside the subscription's rate limits.
+    claude_cli_path: str | None = None
+    # Long-lived token from `claude setup-token`. Read from .env (or the
+    # environment) and passed only to the `claude` subprocess.
+    claude_cli_oauth_token: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices(
+            "GEOGUARD_CLAUDE_CLI_OAUTH_TOKEN", "CLAUDE_CODE_OAUTH_TOKEN"
+        ),
+    )
+    claude_cli_concurrency: int = Field(default=6, gt=0)
+    claude_cli_timeout_seconds: float = Field(default=300.0, gt=0)
+    claude_cli_retries: int = Field(default=2, ge=0)
+
+    # GDACS via the EO MCP tools server (FastMCP). Token is read from
+    # GEOGUARD_GDACS_MCP_TOKEN; the tool is skipped when it is unset.
+    gdacs_mcp_url: str = "https://eo-mcp-tools.fastmcp.app/mcp"
+    gdacs_mcp_token: str | None = None
+
 
 settings = Settings()
 
@@ -94,6 +116,10 @@ def build_model(
     is None.
     """
     resolved_model = model or settings.model
+    if isinstance(resolved_model, str) and resolved_model.startswith("claude-cli:"):
+        from geoguard.claude_cli import claude_cli_model
+
+        return claude_cli_model(resolved_model.split(":", 1)[1])
     resolved_key = api_key or settings.api_key
     if resolved_key is None:
         return resolved_model

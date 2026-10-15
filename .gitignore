@@ -252,3 +252,8 @@ output/
 
 # macOS noise
 .DS_Store
+
+# Evaluation caches (scripts/run_eval.py) — packed results.json.gz is committed instead
+data/eval_v2*/events/
+data/eval_v2*/errors/
+data/eval_v2*/run.log

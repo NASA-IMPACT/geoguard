@@ -61,13 +61,49 @@ FLOOD_LOOKBACK_RULE = (
     "IMPORTANT — flood persistence: Flooding often persists days or weeks "
     "after rainfall ends. When verifying a flood claim, ALWAYS use a "
     "14-day lookback window (from 14 days before the claimed date up to "
-    "the claimed date) for BOTH precipitation AND streamflow tools. "
+    "ONE DAY AFTER the claimed date) for BOTH precipitation AND river tools (USGS "
+    "streamflow, GloFAS discharge, European gauges). "
     "Pass this full date range as start_date/end_date so you can see "
     "the peak, not just the event date. If heavy rainfall or high river "
     "stages occurred in the days preceding the event — even if levels "
     "dropped by the exact date — that supports the flood claim. "
     "For streamflow, do NOT reduce max_gauges below the default (5) — "
     "the best evidence often comes from gauges 15-25 km away."
+)
+
+TIMING_RULE = (
+    "IMPORTANT — timing tolerance: tool values are daily totals on UTC "
+    "days, while events are reported in local time and often begin in the "
+    "evening, so an event can fall on the UTC day AFTER the claimed date. "
+    "Always end every query window at least ONE DAY AFTER the claimed "
+    "date. For storm and wind claims use the window from one day before to "
+    "one day after the claimed date."
+)
+
+FLOOD_EVIDENCE_RULE = (
+    "IMPORTANT — flood-level evidence: rain, or a rise in a river, is not "
+    "by itself a flood. SUPPORT a flood claim only when the evidence shows "
+    "flood-level conditions: river discharge or stage far above normal (a "
+    "peak among the highest in the gauge's multi-year record, or flow many "
+    "times its baseline — an ordinary annual high is not enough), rainfall "
+    "that is extreme for the location, "
+    "or a disaster-catalog record of the event. If the evidence shows only "
+    "ordinary wet weather or a modest rise, return INCONCLUSIVE. Flash "
+    "floods can come from a single storm cell that daily gridded rainfall "
+    "and distant gauges miss, so unremarkable evidence is INCONCLUSIVE, "
+    "not CONTRADICTS. Return CONTRADICTS only when the window was clearly "
+    "dry (little or no rain anywhere in it) and rivers stayed at baseline."
+)
+
+STORM_EVIDENCE_RULE = (
+    "IMPORTANT — storm severity: words like 'severe storm', 'major storm' "
+    "or 'violent storm' assert damaging winds or extreme rain. SUPPORT such "
+    "a claim only when the evidence shows damaging conditions near the place "
+    "and date: measured or reanalysis gusts of roughly 90 km/h or more "
+    "(storm force), or rainfall that is extreme for the location. Ordinary "
+    "windy or wet weather (gusts of 40-70 km/h, moderate rain) does not "
+    "support a severe-storm claim — return INCONCLUSIVE. Return CONTRADICTS "
+    "only when conditions around the date were clearly calm and dry."
 )
 
 COORDINATE_RULE = (
@@ -128,6 +164,11 @@ DEFAULT_INSTRUCTIONS = (
     "  - Streamflow: name the gauge, cite gage height in ft and/or "
     "discharge in cfs, note event peak rank if available (e.g. "
     "'all-time record', 'rank #3 of 76 years').\n"
+    "  - River discharge outside the US (GloFAS, European gauges): peak "
+    "m³/s and date, the rise over baseline, and the multi-year rank if "
+    "computed (e.g. '825 m³/s on Sep 16, 9× baseline, highest of 21 years').\n"
+    "  - Weather stations: the station name and distance, its rainfall "
+    "total and/or MEASURED peak gust in km/h.\n"
     "Example of a GOOD rationale: 'MODIS detected 1830 km² flooded "
     "within the bbox. In the 14 days prior, 198 mm of rain fell "
     "(peak 47 mm/day on Jan 14). Yolo Bypass gage height peaked at "
@@ -136,6 +177,8 @@ DEFAULT_INSTRUCTIONS = (
     "A rationale that says 'satellite data confirms flooding' without "
     "numbers is unacceptable.\n\n"
     "MANDATORY RULES (apply in order before choosing a verdict):\n\n"
+    + TIMING_RULE
+    + "\n\n"
     + COORDINATE_RULE
     + "\n\n"
     + BBOX_RULE
@@ -143,6 +186,10 @@ DEFAULT_INSTRUCTIONS = (
     + RESOLUTION_RULE
     + "\n\n"
     + FLOOD_LOOKBACK_RULE
+    + "\n\n"
+    + FLOOD_EVIDENCE_RULE
+    + "\n\n"
+    + STORM_EVIDENCE_RULE
     + "\n\n"
     + NARRATIVE_RULE
 )
@@ -274,7 +321,20 @@ class Verifier:
             ),
             **run_kwargs,
         )
-        return VerifierResult(
-            verification=result.output,
-            tool_calls=_extract_tool_calls(result.all_messages()),
-        )
+        verification = result.output
+        tool_calls = _extract_tool_calls(result.all_messages())
+        # A verdict must rest on tool evidence. Without any, SUPPORTS or
+        # CONTRADICTS can only come from the model's own knowledge (or the
+        # claim's metadata restating itself), so it is downgraded.
+        if not tool_calls and verification.verdict is not Verdict.INCONCLUSIVE:
+            verification = verification.model_copy(
+                update={
+                    "verdict": Verdict.INCONCLUSIVE,
+                    "rationale": (
+                        "No tool evidence was gathered, so the claim cannot be "
+                        "grounded. Ungrounded model verdict was "
+                        f"{verification.verdict.value}: {verification.rationale}"
+                    ),
+                }
+            )
+        return VerifierResult(verification=verification, tool_calls=tool_calls)

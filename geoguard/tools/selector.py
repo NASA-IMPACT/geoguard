@@ -72,7 +72,12 @@ class ToolSelector:
     async def __call__(
         self, claim: Claim, metadata: Metadata, **run_kwargs
     ) -> SelectedTools:
-        candidates = registry.get_candidates(metadata.event_type)
+        location = metadata.location
+        candidates = registry.get_candidates(
+            metadata.event_type,
+            lat=location.lat if location else None,
+            lon=location.lon if location else None,
+        )
         if not candidates:
             return SelectedTools(tools=[], claim=claim)
         descriptions = "\n".join(_describe_tool(c) for c in candidates)

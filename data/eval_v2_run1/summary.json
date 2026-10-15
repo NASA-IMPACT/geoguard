@@ -1,0 +1,170 @@
+{
+  "n_events": 174,
+  "groups": {
+    "ALL": {
+      "real": {
+        "supports": 71,
+        "contradicts": 14,
+        "inconclusive": 30
+      },
+      "real_n": 115,
+      "fabricated": {
+        "contradicts": 37,
+        "supports": 8,
+        "inconclusive": 14
+      },
+      "fabricated_n": 59
+    },
+    "EU": {
+      "real": {
+        "supports": 26,
+        "contradicts": 8,
+        "inconclusive": 11
+      },
+      "real_n": 45,
+      "fabricated": {
+        "contradicts": 12,
+        "supports": 5,
+        "inconclusive": 7
+      },
+      "fabricated_n": 24
+    },
+    "EU\u00b7flood": {
+      "real": {
+        "supports": 25,
+        "contradicts": 6,
+        "inconclusive": 8
+      },
+      "real_n": 39,
+      "fabricated": {
+        "contradicts": 11,
+        "supports": 5,
+        "inconclusive": 6
+      },
+      "fabricated_n": 22
+    },
+    "EU\u00b7storm": {
+      "real": {
+        "inconclusive": 3,
+        "supports": 1,
+        "contradicts": 2
+      },
+      "real_n": 6,
+      "fabricated": {
+        "contradicts": 1,
+        "inconclusive": 1
+      },
+      "fabricated_n": 2
+    },
+    "US": {
+      "real": {
+        "supports": 45,
+        "inconclusive": 19,
+        "contradicts": 6
+      },
+      "real_n": 70,
+      "fabricated": {
+        "contradicts": 25,
+        "supports": 3,
+        "inconclusive": 7
+      },
+      "fabricated_n": 35
+    },
+    "US\u00b7flood": {
+      "real": {
+        "supports": 44,
+        "inconclusive": 7,
+        "contradicts": 4
+      },
+      "real_n": 55,
+      "fabricated": {
+        "contradicts": 21,
+        "supports": 3,
+        "inconclusive": 2
+      },
+      "fabricated_n": 26
+    },
+    "US\u00b7storm": {
+      "real": {
+        "inconclusive": 12,
+        "contradicts": 2,
+        "supports": 1
+      },
+      "real_n": 15,
+      "fabricated": {
+        "inconclusive": 5,
+        "contradicts": 4
+      },
+      "fabricated_n": 9
+    }
+  },
+  "headline": {
+    "ALL": {
+      "real_not_rejected": [
+        101,
+        115
+      ],
+      "fabricated_endorsed": [
+        8,
+        59
+      ]
+    },
+    "US": {
+      "real_not_rejected": [
+        64,
+        70
+      ],
+      "fabricated_endorsed": [
+        3,
+        35
+      ]
+    },
+    "EU": {
+      "real_not_rejected": [
+        37,
+        45
+      ],
+      "fabricated_endorsed": [
+        5,
+        24
+      ]
+    },
+    "fabricated_easy_endorsed": [
+      3,
+      31
+    ],
+    "fabricated_hard_endorsed": [
+      5,
+      28
+    ]
+  },
+  "fabricated_by_kind": {
+    "wrong_date/easy": {
+      "contradicts": 11,
+      "inconclusive": 3,
+      "supports": 2
+    },
+    "wrong_location/easy": {
+      "contradicts": 11,
+      "inconclusive": 2,
+      "supports": 1
+    },
+    "wrong_date/hard": {
+      "supports": 2,
+      "contradicts": 8,
+      "inconclusive": 3
+    },
+    "wrong_location/hard": {
+      "inconclusive": 5,
+      "supports": 3,
+      "contradicts": 7
+    },
+    "inflated_magnitude/easy": {
+      "inconclusive": 1
+    }
+  },
+  "mean_cost_usd": 0.412,
+  "mean_seconds": 99.0,
+  "mean_llm_calls": 7.1,
+  "model": "claude-cli:sonnet"
+}

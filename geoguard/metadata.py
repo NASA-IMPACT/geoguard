@@ -125,7 +125,13 @@ GEOCODE_RULE = (
     "country, or region whenever the input provides them (e.g., call "
     "`geocode('Galveston, Texas, USA')` not `geocode('Galveston')`) to "
     "avoid resolving to a wrong same-named place. If `geocode` returns "
-    "`found: false`, leave lat and lon as None on that GeoLocation."
+    "`found: false`, leave lat and lon as None on that GeoLocation. "
+    "Exception: when the input states explicit coordinates for a place "
+    "(e.g. '(51.949, 14.701)' or '38.89°N, 121.78°W'), use those as that "
+    "GeoLocation's lat and lon instead of geocoding — stated coordinates "
+    "are more precise than a geocoded name, which can land on a region's "
+    "centre far from the event — and keep the coordinates verbatim in "
+    "every claim about that place."
 )
 
 

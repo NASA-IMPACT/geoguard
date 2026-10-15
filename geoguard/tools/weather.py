@@ -1,11 +1,14 @@
 import asyncio
+import gzip
+import json
 import math
+from datetime import date, timedelta
 
 import httpx
 from geopy.distance import geodesic
 
 from geoguard.config import settings
-from geoguard.schemas import EventType
+from geoguard.schemas import EventType, Region
 from geoguard.tools.registry import registry
 from geoguard.utils import date_range, graceful_http
 
@@ -91,6 +94,12 @@ async def get_historical_winds(
     Source: Open-Meteo Historical Archive (global, no API key required).
     Data granularity is daily; the range is inclusive of both endpoints.
 
+    ERA5 is a ~25 km reanalysis: it captures large storms (cyclones,
+    windstorms) but smooths out convective downbursts and thunderstorm
+    gusts, which last minutes and span a few km. A low ERA5 gust does NOT
+    contradict a measured thunderstorm gust — prefer station observations
+    (`get_station_observations`) and treat ERA5 as a lower bound there.
+
     Args:
         start_date: Start of the inclusive range (YYYY-MM-DD).
         end_date: End of the inclusive range (YYYY-MM-DD). If None, queries
@@ -143,7 +152,7 @@ async def get_historical_winds(
     }
 
 
-@registry(EventType.FLOOD, EventType.STORM)
+@registry(EventType.FLOOD, EventType.STORM, coverage=Region.US)
 @graceful_http
 async def get_radar_gauge_precipitation(
     lat: float,
@@ -251,7 +260,7 @@ async def get_radar_gauge_precipitation(
     }
 
 
-@registry(EventType.FLOOD, EventType.STORM)
+@registry(EventType.FLOOD, EventType.STORM, coverage=Region.US)
 @graceful_http
 async def get_streamflow_history(
     lat: float,
@@ -561,4 +570,561 @@ async def get_streamflow_history(
         "start_date": start_date,
         "end_date": end,
         "source": "USGS Water Services NWIS (daily values + annual peak streamflow)",
+    }
+
+
+_GLOFAS_URL = "https://flood-api.open-meteo.com/v1/flood"
+_GLOFAS_BASELINE_DAYS = 60
+_glofas_history: dict[tuple[float, float, int, int], list[tuple[str, float]]] = {}
+
+
+async def _open_meteo_get(
+    client: httpx.AsyncClient, url: str, params: dict
+) -> httpx.Response:
+    """GET with backoff on 429 — Open-Meteo's free tier rate-limits bursts per minute."""
+    for attempt in range(4):
+        r = await client.get(url, params=params)
+        if r.status_code != 429:
+            break
+        await asyncio.sleep(15 * (attempt + 1))
+    r.raise_for_status()
+    return r
+
+
+@registry(EventType.FLOOD, EventType.STORM)
+@graceful_http
+async def get_river_discharge_glofas(
+    lat: float,
+    lon: float,
+    start_date: str,
+    end_date: str | None = None,
+    history_years: int = 0,
+) -> dict:
+    """Daily river discharge (m³/s) from Copernicus GloFAS — global, including Europe.
+
+    Source: Open-Meteo Flood API serving the Copernicus Emergency
+    Management Service GloFAS v4 reanalysis (~5 km grid, 1984–present, no
+    API key). Use this for river-flooding claims OUTSIDE the US, where
+    USGS gauges (`get_streamflow_history`) are unavailable; it also works
+    inside the US as a second, independent line of evidence.
+
+    The query point is snapped to the river cell with the largest flow
+    within ~5 km, so pass the claim's location — `river_cell` reports
+    where the series actually comes from. Values are model-simulated
+    discharge, not a gauge reading: trust them for RELATIVE magnitude
+    (how far the peak rose above normal) far more than for exact m³/s,
+    and expect small streams to be poorly represented.
+
+    `peak_to_baseline_ratio` compares the peak with the median flow of the
+    60 days before the range. Floods typically lift flow one to two orders
+    of magnitude, but ordinary rain on a low-flow river can also give a
+    several-fold rise — read the ratio together with peak_m3s, and use
+    history_years when the claim's wording hinges on how extreme it was.
+
+    Args:
+        start_date: Start of the inclusive range (YYYY-MM-DD). For flood
+            claims use a lookback window (e.g. 14 days before the event).
+        end_date: End of the inclusive range (YYYY-MM-DD). None → single day.
+        history_years: 0 (default) skips the long-term comparison. Set it
+            (max 20) ONLY when the claim asserts a record or "highest in N
+            years" — it is expensive — to rank the peak among that many
+            years of annual maxima.
+
+    Returns: dict with keys:
+        found: True if a river cell with flow was found near the point.
+        reason: Short explanation when found=False (else absent).
+        river_cell: {"lat", "lon"} of the grid cell used.
+        dates: ISO dates, one per day in the range.
+        daily_discharge_m3s: Daily discharge values (None where missing).
+        peak_m3s: Highest daily discharge in the range.
+        peak_date: Date of peak_m3s.
+        baseline_m3s: Median daily discharge over the 60 days before the range.
+        peak_to_baseline_ratio: peak_m3s / baseline_m3s.
+        event_rank: (only with history_years) rank of the peak among the
+            annual maxima of the previous history_years years plus this
+            event — 1 = highest on record for that period.
+        years_compared: (only with history_years) annual maxima compared.
+        lat, lon, start_date, end_date: Query echo.
+        source: Identifier of the data source.
+    """
+    end = end_date or start_date
+    step = 0.05  # GloFAS v4 grid spacing in degrees
+    offsets = [-step, 0.0, step]
+    lats = [round(lat + dy, 4) for dy in offsets for _ in offsets]
+    lons = [round(lon + dx, 4) for _ in offsets for dx in offsets]
+
+    async with httpx.AsyncClient(timeout=settings.http_timeout_seconds) as c:
+        r = await _open_meteo_get(
+            c,
+            _GLOFAS_URL,
+            {
+                "latitude": ",".join(map(str, lats)),
+                "longitude": ",".join(map(str, lons)),
+                "daily": "river_discharge",
+                "start_date": start_date,
+                "end_date": end,
+            },
+        )
+        cells = r.json()
+        if isinstance(cells, dict):
+            cells = [cells]
+
+        def mean_flow(cell: dict) -> float:
+            vals = [
+                v
+                for v in cell.get("daily", {}).get("river_discharge") or []
+                if v is not None
+            ]
+            return sum(vals) / len(vals) if vals else 0.0
+
+        best = max(cells, key=mean_flow)
+        if mean_flow(best) <= 0:
+            return {
+                "found": False,
+                "reason": "No GloFAS river cell with flow within ~5 km of the point.",
+                "lat": lat,
+                "lon": lon,
+                "start_date": start_date,
+                "end_date": end,
+            }
+        cell_lat, cell_lon = best["latitude"], best["longitude"]
+
+        first_day = date.fromisoformat(start_date[:10])
+        base = await _open_meteo_get(
+            c,
+            _GLOFAS_URL,
+            {
+                "latitude": cell_lat,
+                "longitude": cell_lon,
+                "daily": "river_discharge",
+                "start_date": (
+                    first_day - timedelta(days=_GLOFAS_BASELINE_DAYS)
+                ).isoformat(),
+                "end_date": (first_day - timedelta(days=1)).isoformat(),
+            },
+        )
+        base_vals = sorted(
+            v
+            for v in base.json().get("daily", {}).get("river_discharge") or []
+            if v is not None
+        )
+
+        history: list[tuple[str, float]] = []
+        years = max(0, min(int(history_years), 20))
+        if years:
+            key = (cell_lat, cell_lon, first_day.year, years)
+            if key not in _glofas_history:
+                hist = await _open_meteo_get(
+                    c,
+                    _GLOFAS_URL,
+                    {
+                        "latitude": cell_lat,
+                        "longitude": cell_lon,
+                        "daily": "river_discharge",
+                        "start_date": f"{max(first_day.year - years, 1984)}-01-01",
+                        "end_date": f"{first_day.year - 1}-12-31",
+                    },
+                )
+                daily = hist.json().get("daily", {})
+                _glofas_history[key] = [
+                    (d, v)
+                    for d, v in zip(
+                        daily.get("time") or [], daily.get("river_discharge") or []
+                    )
+                    if v is not None
+                ]
+            history = _glofas_history[key]
+
+    dates = best["daily"]["time"]
+    series = best["daily"]["river_discharge"]
+    valid = [(d, v) for d, v in zip(dates, series) if v is not None]
+    peak_date, peak = max(valid, key=lambda x: x[1])
+    baseline = base_vals[len(base_vals) // 2] if base_vals else None
+
+    result = {
+        "found": True,
+        "river_cell": {"lat": cell_lat, "lon": cell_lon},
+        "dates": dates,
+        "daily_discharge_m3s": series,
+        "peak_m3s": round(peak, 2),
+        "peak_date": peak_date,
+        "baseline_m3s": round(baseline, 2) if baseline else None,
+        "peak_to_baseline_ratio": round(peak / baseline, 1) if baseline else None,
+        "lat": lat,
+        "lon": lon,
+        "start_date": start_date,
+        "end_date": end,
+        "source": "Copernicus GloFAS v4 reanalysis via Open-Meteo Flood API",
+    }
+    if history:
+        annual_max: dict[str, float] = {}
+        for d, v in history:
+            annual_max[d[:4]] = max(annual_max.get(d[:4], 0.0), v)
+        result["event_rank"] = sum(1 for m in annual_max.values() if m > peak) + 1
+        result["years_compared"] = len(annual_max) + 1
+    return result
+
+
+_METEOSTAT_BULK = "https://bulk.meteostat.net/v2"
+_meteostat_stations: list[dict] | None = None
+
+
+async def _meteostat_station_list(client: httpx.AsyncClient) -> list[dict]:
+    """Meteostat's station catalog (~16k stations), downloaded once per process."""
+    global _meteostat_stations
+    if _meteostat_stations is None:
+        r = await client.get(f"{_METEOSTAT_BULK}/stations/lite.json.gz")
+        r.raise_for_status()
+        _meteostat_stations = json.loads(gzip.decompress(r.content))
+    return _meteostat_stations
+
+
+def _float_or_none(value: str) -> float | None:
+    return float(value) if value not in ("", None) else None
+
+
+@registry(EventType.FLOOD, EventType.STORM)
+@graceful_http
+async def get_station_observations(
+    lat: float,
+    lon: float,
+    start_date: str,
+    end_date: str | None = None,
+    search_radius_km: float = 75.0,
+    max_stations: int = 4,
+) -> dict:
+    """Daily rain gauge totals and measured wind gusts at nearby weather stations — global, incl. Europe.
+
+    Source: Meteostat bulk archive of national weather-service station
+    records (AEMET, DWD, Météo-France, Met Office, NOAA ISD, …). These are
+    point observations from instruments, so they are the European
+    counterpart to `get_radar_gauge_precipitation` (US-only) for rainfall
+    claims, and the only source here of station-MEASURED wind gusts for
+    storm claims (ERA5 winds are model output).
+
+    Station networks are sparse (synoptic stations, often 20-100 km apart),
+    and convective rain is highly localized: a nearby station recording
+    little rain does NOT contradict an extreme local rainfall claim. Use
+    the maximum across stations, and treat low readings at distant
+    stations as inconclusive rather than contradicting.
+
+    Args:
+        start_date: Start of the inclusive range (YYYY-MM-DD).
+        end_date: End of the inclusive range (YYYY-MM-DD). None → single day.
+        search_radius_km: Radius around (lat, lon) to search for stations.
+        max_stations: Cap on stations returned (nearest first, only stations
+            with data in the range).
+
+    Returns: dict with keys:
+        found: True if at least one station had data in the range.
+        reason: Short explanation when found=False (else absent).
+        dates: ISO dates, one per day in the range.
+        stations: list (nearest first) of {id, name, country, distance_km,
+            daily_precip_mm, daily_peak_gust_kmh, daily_mean_wind_kmh,
+            total_precip_mm, peak_gust_kmh}.
+        max_total_precip_mm: Largest range total across stations.
+        max_daily_precip_mm: Largest single-day total across stations.
+        max_peak_gust_kmh: Largest measured gust across stations.
+        lat, lon, start_date, end_date: Query echo.
+        source: Identifier of the data source.
+    """
+    end = end_date or start_date
+    iso_dates = [d.isoformat() for d in date_range(start_date, end)]
+
+    async with httpx.AsyncClient(timeout=settings.http_timeout_seconds) as c:
+        catalog = await _meteostat_station_list(c)
+        nearby = []
+        for s in catalog:
+            loc = s.get("location") or {}
+            daily = (s.get("inventory") or {}).get("daily") or {}
+            if loc.get("latitude") is None or not daily.get("start"):
+                continue
+            if not (
+                daily["start"] <= iso_dates[-1]
+                and (daily.get("end") or "") >= iso_dates[0]
+            ):
+                continue
+            dist = geodesic((lat, lon), (loc["latitude"], loc["longitude"])).kilometers
+            if dist <= search_radius_km:
+                nearby.append((dist, s))
+        nearby.sort(key=lambda x: x[0])
+
+        stations_out = []
+        for dist, s in nearby:
+            if len(stations_out) >= max_stations:
+                break
+            r = await c.get(f"{_METEOSTAT_BULK}/daily/{s['id']}.csv.gz")
+            if r.status_code != 200:
+                continue
+            rows = {}
+            for line in gzip.decompress(r.content).decode().splitlines():
+                cols = line.split(",")
+                if cols[0] in iso_dates:
+                    rows[cols[0]] = cols
+            if not rows:
+                continue
+            precip = [
+                _float_or_none(rows[d][4]) if d in rows else None for d in iso_dates
+            ]
+            gust = [
+                _float_or_none(rows[d][8]) if d in rows else None for d in iso_dates
+            ]
+            wind = [
+                _float_or_none(rows[d][7]) if d in rows else None for d in iso_dates
+            ]
+            p_valid = [v for v in precip if v is not None]
+            g_valid = [v for v in gust if v is not None]
+            stations_out.append(
+                {
+                    "id": s["id"],
+                    "name": (s.get("name") or {}).get("en"),
+                    "country": s.get("country"),
+                    "distance_km": round(dist, 1),
+                    "daily_precip_mm": precip,
+                    "daily_peak_gust_kmh": gust,
+                    "daily_mean_wind_kmh": wind,
+                    "total_precip_mm": round(sum(p_valid), 1) if p_valid else None,
+                    "peak_gust_kmh": max(g_valid) if g_valid else None,
+                }
+            )
+
+    if not stations_out:
+        return {
+            "found": False,
+            "reason": f"No station with daily data within {search_radius_km:.0f} km for this range.",
+            "lat": lat,
+            "lon": lon,
+            "start_date": start_date,
+            "end_date": end,
+        }
+
+    def _max(values):
+        values = [v for v in values if v is not None]
+        return max(values) if values else None
+
+    return {
+        "found": True,
+        "dates": iso_dates,
+        "stations": stations_out,
+        "max_total_precip_mm": _max(s["total_precip_mm"] for s in stations_out),
+        "max_daily_precip_mm": _max(
+            v for s in stations_out for v in s["daily_precip_mm"]
+        ),
+        "max_peak_gust_kmh": _max(s["peak_gust_kmh"] for s in stations_out),
+        "lat": lat,
+        "lon": lon,
+        "start_date": start_date,
+        "end_date": end,
+        "source": "Meteostat bulk archive (national weather-service station records)",
+    }
+
+
+_HUBEAU = "https://hubeau.eaufrance.fr/api/v2/hydrometrie"
+_UK_EA = "https://environment.data.gov.uk/hydrology"
+_FRANCE_BOX = (41.3, 51.2, -5.3, 9.7)
+_UK_BOX = (49.8, 61.0, -8.7, 2.0)
+
+
+def _in_box(lat: float, lon: float, box: tuple[float, float, float, float]) -> bool:
+    return box[0] <= lat <= box[1] and box[2] <= lon <= box[3]
+
+
+async def _france_gauges(c, lat, lon, iso_dates, radius_km, max_gauges) -> list[dict]:
+    r = await c.get(
+        f"{_HUBEAU}/referentiel/stations",
+        params={
+            "latitude": lat,
+            "longitude": lon,
+            "distance": radius_km,
+            "en_service": "true",
+            "format": "json",
+            "size": 30,
+        },
+    )
+    r.raise_for_status()
+    stations = sorted(
+        (
+            (
+                geodesic(
+                    (lat, lon), (s["latitude_station"], s["longitude_station"])
+                ).kilometers,
+                s,
+            )
+            for s in r.json().get("data", [])
+            if s.get("latitude_station") is not None
+        ),
+        key=lambda x: x[0],
+    )
+    out = []
+    for dist, s in stations:
+        if len(out) >= max_gauges:
+            break
+        obs = await c.get(
+            f"{_HUBEAU}/obs_elab",
+            params={
+                "code_entite": s["code_station"],
+                "grandeur_hydro_elab": "QmnJ",
+                "date_debut_obs_elab": iso_dates[0],
+                "date_fin_obs_elab": iso_dates[-1],
+                "size": 400,
+            },
+        )
+        if obs.status_code not in (200, 206):
+            continue
+        by_day = {
+            o["date_obs_elab"][:10]: o["resultat_obs_elab"] / 1000.0  # l/s → m³/s
+            for o in obs.json().get("data", [])
+            if o.get("resultat_obs_elab") is not None
+        }
+        if by_day:
+            out.append(
+                {
+                    "name": s["libelle_station"],
+                    "id": s["code_station"],
+                    "country": "France",
+                    "distance_km": round(dist, 1),
+                    "daily_m3s": [
+                        round(by_day[d], 2) if d in by_day else None for d in iso_dates
+                    ],
+                }
+            )
+    return out
+
+
+async def _uk_gauges(c, lat, lon, iso_dates, radius_km, max_gauges) -> list[dict]:
+    r = await c.get(
+        f"{_UK_EA}/id/stations",
+        params={
+            "lat": lat,
+            "long": lon,
+            "dist": radius_km,
+            "observedProperty": "waterFlow",
+            "_limit": 30,
+        },
+    )
+    r.raise_for_status()
+    stations = sorted(
+        (
+            (geodesic((lat, lon), (s["lat"], s["long"])).kilometers, s)
+            for s in r.json().get("items", [])
+            if s.get("lat") is not None
+        ),
+        key=lambda x: x[0],
+    )
+    end_exclusive = (date.fromisoformat(iso_dates[-1]) + timedelta(days=1)).isoformat()
+    out = []
+    for dist, s in stations:
+        if len(out) >= max_gauges:
+            break
+        measure = next(
+            (
+                m["@id"]
+                for m in s.get("measures", [])
+                if "flow-m-86400-m3s" in m.get("@id", "")
+            ),
+            None,
+        )
+        if not measure:
+            continue
+        measure = measure.replace(
+            "http://", "https://", 1
+        )  # EA ids are http; API redirects
+        obs = await c.get(
+            f"{measure}/readings",
+            params={"mineq-date": iso_dates[0], "max-date": end_exclusive},
+        )
+        if obs.status_code != 200:
+            continue
+        by_day = {
+            o["date"][:10]: o["value"]
+            for o in obs.json().get("items", [])
+            if o.get("value") is not None
+        }
+        if by_day:
+            out.append(
+                {
+                    "name": s.get("label"),
+                    "id": s.get("notation"),
+                    "country": "United Kingdom",
+                    "distance_km": round(dist, 1),
+                    "daily_m3s": [by_day.get(d) for d in iso_dates],
+                }
+            )
+    return out
+
+
+@registry(EventType.FLOOD, EventType.STORM, coverage=Region.EUROPE)
+@graceful_http
+async def get_european_river_gauges(
+    lat: float,
+    lon: float,
+    start_date: str,
+    end_date: str | None = None,
+    search_radius_km: float = 40.0,
+    max_gauges: int = 4,
+) -> dict:
+    """Daily mean river discharge (m³/s) MEASURED at national river gauges in Europe.
+
+    The European counterpart to `get_streamflow_history` (USGS, US-only):
+    observed gauge readings from national hydrometric services. Currently
+    integrated: France (Hub'Eau / Vigicrues network) and the United Kingdom
+    (Environment Agency hydrology). Elsewhere in Europe it returns
+    found=False — use `get_river_discharge_glofas` (Copernicus, pan-European,
+    model-simulated) instead, which also gives the multi-year rank of a peak.
+
+    Args:
+        start_date: Start of inclusive range (YYYY-MM-DD). For flood claims
+            use a lookback window (e.g. 14 days before the event).
+        end_date: End of inclusive range (YYYY-MM-DD). None → single day.
+        search_radius_km: Radius around (lat, lon) to search for gauges.
+        max_gauges: Cap on gauges returned (nearest first, with flow data).
+
+    Returns: dict with keys:
+        found: True if at least one gauge had discharge data in the range.
+        reason: Short explanation when found=False (else absent).
+        dates: ISO dates, one per day.
+        gauges: list (nearest first) of {name, id, country, distance_km,
+            daily_m3s, peak_m3s, peak_date}.
+        lat, lon, start_date, end_date: Query echo.
+        source: Identifier of the data source.
+    """
+    end = end_date or start_date
+    iso_dates = [d.isoformat() for d in date_range(start_date, end)]
+    gauges: list[dict] = []
+    async with httpx.AsyncClient(timeout=settings.http_timeout_seconds) as c:
+        if _in_box(lat, lon, _FRANCE_BOX):
+            gauges += await _france_gauges(
+                c, lat, lon, iso_dates, search_radius_km, max_gauges
+            )
+        if _in_box(lat, lon, _UK_BOX):
+            gauges += await _uk_gauges(
+                c, lat, lon, iso_dates, search_radius_km, max_gauges
+            )
+
+    if not gauges:
+        return {
+            "found": False,
+            "reason": (
+                "No national gauge with discharge data nearby. Gauge APIs are "
+                "integrated for France and the UK; elsewhere use "
+                "get_river_discharge_glofas."
+            ),
+            "lat": lat,
+            "lon": lon,
+            "start_date": start_date,
+            "end_date": end,
+        }
+    for g in gauges:
+        valid = [(d, v) for d, v in zip(iso_dates, g["daily_m3s"]) if v is not None]
+        g["peak_date"], g["peak_m3s"] = max(valid, key=lambda x: x[1])
+    gauges.sort(key=lambda g: g["distance_km"])
+    return {
+        "found": True,
+        "dates": iso_dates,
+        "gauges": gauges[:max_gauges],
+        "lat": lat,
+        "lon": lon,
+        "start_date": start_date,
+        "end_date": end,
+        "source": "Hub'Eau hydrométrie (France) / Environment Agency hydrology (UK)",
     }
