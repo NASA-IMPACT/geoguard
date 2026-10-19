@@ -1,0 +1,163 @@
+{
+  "n_events": 170,
+  "groups": {
+    "ALL": {
+      "real": {
+        "supports": 58,
+        "inconclusive": 51,
+        "contradicts": 3
+      },
+      "real_n": 112,
+      "fabricated": {
+        "inconclusive": 37,
+        "supports": 6,
+        "contradicts": 15
+      },
+      "fabricated_n": 58
+    },
+    "EU": {
+      "real": {
+        "supports": 23,
+        "inconclusive": 16,
+        "contradicts": 3
+      },
+      "real_n": 42,
+      "fabricated": {
+        "inconclusive": 13,
+        "supports": 4,
+        "contradicts": 6
+      },
+      "fabricated_n": 23
+    },
+    "EU\u00b7flood": {
+      "real": {
+        "supports": 21,
+        "inconclusive": 15
+      },
+      "real_n": 36,
+      "fabricated": {
+        "inconclusive": 13,
+        "supports": 4,
+        "contradicts": 4
+      },
+      "fabricated_n": 21
+    },
+    "EU\u00b7storm": {
+      "real": {
+        "inconclusive": 1,
+        "contradicts": 3,
+        "supports": 2
+      },
+      "real_n": 6,
+      "fabricated": {
+        "contradicts": 2
+      },
+      "fabricated_n": 2
+    },
+    "US": {
+      "real": {
+        "supports": 35,
+        "inconclusive": 35
+      },
+      "real_n": 70,
+      "fabricated": {
+        "inconclusive": 24,
+        "supports": 2,
+        "contradicts": 9
+      },
+      "fabricated_n": 35
+    },
+    "US\u00b7flood": {
+      "real": {
+        "supports": 35,
+        "inconclusive": 20
+      },
+      "real_n": 55,
+      "fabricated": {
+        "inconclusive": 15,
+        "supports": 2,
+        "contradicts": 9
+      },
+      "fabricated_n": 26
+    },
+    "US\u00b7storm": {
+      "real": {
+        "inconclusive": 15
+      },
+      "real_n": 15,
+      "fabricated": {
+        "inconclusive": 9
+      },
+      "fabricated_n": 9
+    }
+  },
+  "headline": {
+    "ALL": {
+      "real_not_rejected": [
+        109,
+        112
+      ],
+      "fabricated_endorsed": [
+        6,
+        58
+      ]
+    },
+    "US": {
+      "real_not_rejected": [
+        70,
+        70
+      ],
+      "fabricated_endorsed": [
+        2,
+        35
+      ]
+    },
+    "EU": {
+      "real_not_rejected": [
+        39,
+        42
+      ],
+      "fabricated_endorsed": [
+        4,
+        23
+      ]
+    },
+    "fabricated_easy_endorsed": [
+      2,
+      31
+    ],
+    "fabricated_hard_endorsed": [
+      4,
+      27
+    ]
+  },
+  "fabricated_by_kind": {
+    "wrong_date/easy": {
+      "inconclusive": 9,
+      "contradicts": 6,
+      "supports": 1
+    },
+    "wrong_location/easy": {
+      "inconclusive": 11,
+      "contradicts": 2,
+      "supports": 1
+    },
+    "wrong_date/hard": {
+      "supports": 1,
+      "inconclusive": 8,
+      "contradicts": 3
+    },
+    "wrong_location/hard": {
+      "supports": 3,
+      "inconclusive": 8,
+      "contradicts": 4
+    },
+    "inflated_magnitude/easy": {
+      "inconclusive": 1
+    }
+  },
+  "mean_cost_usd": 0.0019,
+  "mean_seconds": 36.5,
+  "mean_llm_calls": 5.6,
+  "model": "openai:gpt-6-luna"
+}

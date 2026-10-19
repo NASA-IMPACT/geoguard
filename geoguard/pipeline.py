@@ -152,6 +152,11 @@ class GeoGuard:
                 yield item
                 if isinstance(item, VerifierResult):
                     verifications.append(item)
+            # A claim whose sub-pipeline raised (e.g. a model API timeout) must
+            # fail the run, not vanish from the report as if it were never made.
+            for outcome in await asyncio.gather(*tasks, return_exceptions=True):
+                if isinstance(outcome, BaseException):
+                    raise outcome
 
         rubric = await self.rubricator(inp, verifications)
         yield rubric

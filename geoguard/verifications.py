@@ -88,11 +88,14 @@ FLOOD_EVIDENCE_RULE = (
     "times its baseline — an ordinary annual high is not enough), rainfall "
     "that is extreme for the location, "
     "or a disaster-catalog record of the event. If the evidence shows only "
-    "ordinary wet weather or a modest rise, return INCONCLUSIVE. Flash "
-    "floods can come from a single storm cell that daily gridded rainfall "
-    "and distant gauges miss, so unremarkable evidence is INCONCLUSIVE, "
-    "not CONTRADICTS. Return CONTRADICTS only when the window was clearly "
-    "dry (little or no rain anywhere in it) and rivers stayed at baseline."
+    "ordinary wet weather or a modest rise, return INCONCLUSIVE. A single "
+    "storm cell can be missed by ERA5 and distant gauges, but radar (MRMS) "
+    "at the point resolves storm cells: if radar or gauge products at the "
+    "point (MRMS, PRISM, nearby stations) show essentially no rain (under "
+    "about 5 mm) through the window, a rain-driven flood or flash-flood "
+    "claim is CONTRADICTED. Outside radar coverage, return CONTRADICTS when "
+    "ERA5 and nearby stations show little or no rain and river discharge "
+    "stayed near baseline."
 )
 
 STORM_EVIDENCE_RULE = (

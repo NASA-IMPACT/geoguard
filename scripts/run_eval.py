@@ -9,15 +9,17 @@ disaster catalogs, and letting a catalog confirm its own events would leak
 the label into the evidence. MODIS and VEDA STAC are left out for runtime.
 
 Resumable: every finished event is written to data/eval_v2/events/<id>.json
-immediately and skipped on rerun. Failed events are recorded under
-errors/ and retried on the next run. If the Claude subscription hits its
-usage window, the run stops cleanly — rerun later to continue.
+immediately and skipped on rerun (only if it came from the same model).
+Failed events are recorded under errors/ and retried on the next run. If the
+Claude subscription hits its usage window, the run stops cleanly — rerun
+later to continue. Cost per event is recorded for the claude-cli backend and,
+at list price (PRICES), for API models.
 
 Usage:
     uv run python scripts/run_eval.py --limit 4          # smoke test
     uv run python scripts/run_eval.py                    # full set
     uv run python scripts/run_eval.py --summary          # metrics only
-    uv run python scripts/run_eval.py --model openai:gpt-4.1-mini
+    uv run python scripts/run_eval.py --model openai:gpt-6-luna
 """
 
 from __future__ import annotations
@@ -31,15 +33,72 @@ import time
 from collections import Counter, defaultdict
 from pathlib import Path
 
+from pydantic_ai.models import infer_model
+from pydantic_ai.models.function import FunctionModel
+from pydantic_ai.models.wrapper import WrapperModel
+
+import geoguard.metadata
+import geoguard.rubrics
 import geoguard.tools.geospatial  # noqa: F401  elevation, nearest water body
+import geoguard.tools.selector
 import geoguard.tools.weather  # noqa: F401  ERA5, PRISM/MRMS, USGS, GloFAS
+import geoguard.verifications
 from geoguard import GeoGuard, Input
 from geoguard import claude_cli
+from geoguard import config as gg_config
 
 _ROOT = Path(__file__).resolve().parent.parent
 EVAL_DIR = _ROOT / "data" / "eval_v2"
 EVENTS_CSV = EVAL_DIR / "events.csv"
+# Where per-event results and summary.json go; --results-dir points it elsewhere
+# so a second model's run does not overwrite the first.
+RESULTS_DIR = EVAL_DIR
 RESULT_TRUNCATE = 4000
+
+
+# USD per 1M tokens: (input, cached input, output), list prices.
+PRICES = {
+    "gpt-6-luna": (0.10, 0.01, 0.50),
+    "gpt-5.6-terra": (2.00, 0.20, 12.00),
+    "gpt-5.6-luna": (0.20, 0.02, 1.20),
+    "gpt-4.1-mini": (0.40, 0.10, 1.60),
+}
+
+
+class _CostTracked(WrapperModel):
+    """Adds each request's token usage and list-price cost to the event's bucket."""
+
+    async def request(self, messages, model_settings, model_request_parameters):
+        resp = await super().request(messages, model_settings, model_request_parameters)
+        bucket = claude_cli.current_cost_bucket.get()
+        if bucket is not None:
+            u = resp.usage
+            p_in, p_cached, p_out = PRICES.get(self.model_name, (0.0, 0.0, 0.0))
+            fresh = max(0, u.input_tokens - u.cache_read_tokens)
+            tot = claude_cli.cost_totals.setdefault(
+                bucket, {"cost_usd": 0.0, "input_tokens": 0, "output_tokens": 0, "calls": 0}
+            )
+            tot["cost_usd"] += (
+                fresh * p_in + u.cache_read_tokens * p_cached + u.output_tokens * p_out
+            ) / 1e6
+            tot["input_tokens"] += u.input_tokens
+            tot["output_tokens"] += u.output_tokens
+            tot["calls"] += 1
+        return resp
+
+
+def _track_api_costs() -> None:
+    """Wrap API models so OpenAI/Anthropic runs report cost like the claude-cli backend."""
+    original = gg_config.build_model
+
+    def build_model(model=None, api_key=None):
+        built = original(model, api_key)
+        if isinstance(built, FunctionModel):  # claude-cli records its own cost
+            return built
+        return _CostTracked(infer_model(built) if isinstance(built, str) else built)
+
+    for module in (geoguard.metadata, geoguard.tools.selector, geoguard.verifications, geoguard.rubrics):
+        module.build_model = build_model
 
 
 def _trim(value) -> str:
@@ -50,8 +109,8 @@ def _trim(value) -> str:
 async def run_event(
     guard: GeoGuard, ev: dict, model: str, sem: asyncio.Semaphore
 ) -> str:
-    out = EVAL_DIR / "events" / f"{ev['event_id']}.json"
-    err = EVAL_DIR / "errors" / f"{ev['event_id']}.json"
+    out = RESULTS_DIR / "events" / f"{ev['event_id']}.json"
+    err = RESULTS_DIR / "errors" / f"{ev['event_id']}.json"
     if out.exists() and json.loads(out.read_text()).get("model") == model:
         return "cached"  # a result from a different model is re-run and overwritten
     async with sem:
@@ -108,13 +167,36 @@ async def run_event(
     return "done"
 
 
+def stratified_sample(events: list[dict], n: int, seed: int) -> list[dict]:
+    """Seeded random sample of n events that keeps the full set's mix of
+    region × label × event class (largest-remainder allocation)."""
+    import random
+
+    strata: dict[tuple, list[dict]] = defaultdict(list)
+    for e in events:
+        strata[(e["region"], e["label"], e["event_class"])].append(e)
+    total = len(events)
+    quota = {k: n * len(v) / total for k, v in strata.items()}
+    alloc = {k: int(q) for k, q in quota.items()}
+    for k in sorted(quota, key=lambda k: quota[k] - alloc[k], reverse=True)[: n - sum(alloc.values())]:
+        alloc[k] += 1
+    rng = random.Random(seed)
+    picked = []
+    for k in sorted(strata):
+        picked += rng.sample(sorted(strata[k], key=lambda e: e["event_id"]), alloc[k])
+    return sorted(picked, key=lambda e: int(e["run_order"]))
+
+
 async def run_all(args) -> None:
     events = list(csv.DictReader(open(EVENTS_CSV)))
     events.sort(key=lambda e: int(e["run_order"]))
+    if args.sample:
+        events = stratified_sample(events, args.sample, args.seed)
     if args.limit:
         events = events[: args.limit]
     if args.only:
         events = [e for e in events if e["event_id"] in set(args.only)]
+    _track_api_costs()
     guard = GeoGuard(
         model=args.model, reasoning_effort=args.reasoning, max_claims=args.max_claims
     )
@@ -165,7 +247,7 @@ def summarize() -> dict:
     # Only events in the current set count (results for dropped events stay on disk).
     current = {e["event_id"] for e in csv.DictReader(open(EVENTS_CSV))}
     recs = [
-        json.loads(p.read_text()) for p in sorted((EVAL_DIR / "events").glob("*.json"))
+        json.loads(p.read_text()) for p in sorted((RESULTS_DIR / "events").glob("*.json"))
     ]
     recs = [r for r in recs if r["event"]["event_id"] in current]
     if not recs:
@@ -253,7 +335,7 @@ def summarize() -> dict:
         f"(API-equivalent) · {summary['mean_seconds']:.0f} s/event · "
         f"{summary['mean_llm_calls']:.0f} LLM calls/event"
     )
-    (EVAL_DIR / "summary.json").write_text(json.dumps(summary, indent=2))
+    (RESULTS_DIR / "summary.json").write_text(json.dumps(summary, indent=2))
     return summary
 
 
@@ -266,6 +348,15 @@ def main() -> None:
     p.add_argument("--max-claims", type=int, default=3)
     p.add_argument("--parallel-events", type=int, default=3)
     p.add_argument("--limit", type=int, default=0)
+    p.add_argument(
+        "--sample", type=int, default=0,
+        help="Seeded stratified sample of N events (region × label × class)",
+    )
+    p.add_argument("--seed", type=int, default=0)
+    p.add_argument(
+        "--results-dir", type=Path, default=None,
+        help="Write results here instead of data/eval_v2 (keeps other runs intact)",
+    )
     p.add_argument("--only", nargs="*", help="Run only these event_ids")
     p.add_argument(
         "--summary",
@@ -273,6 +364,9 @@ def main() -> None:
         help="Print metrics from saved results and exit",
     )
     args = p.parse_args()
+    if args.results_dir:
+        global RESULTS_DIR
+        RESULTS_DIR = args.results_dir.resolve()
     if not args.summary:
         asyncio.run(run_all(args))
     summarize()
