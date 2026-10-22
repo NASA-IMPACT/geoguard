@@ -177,8 +177,11 @@ Both `ClaimExtractor` and `MetadataExtractor` (in `list[ClaimGroup]` mode) compo
 - **ATOMIC**: one factual assertion per claim
 - **DECONTEXTUALIZED**: include all proper nouns, absolute dates, explicit locations; no pronouns / deictic references that need surrounding context
 - **DISTINCT**: no claim may overlap with or be a sub-statement of another; merge overlapping facts into one comprehensive claim
-- **FAITHFUL**: every fact must be explicitly stated in the input (combining facts from different parts of the input is allowed; adding, inferring, or pulling from prior knowledge is not)
-- **VERIFIABLE**: checkable against an external source
+- **FAITHFUL**: every fact must be explicitly stated in the input; never fabricate unstated causal, temporal, or spatial links between events
+- **FACTUAL AND RELEVANT**: drop vague assertions, opinions, subjective impressions, hedges, and conversational asides
+- **VERIFIABLE IN PRINCIPLE**: claims must assert concrete, falsifiable facts rather than subjective judgments. Hard-to-verify is never a drop reason: extraction passes concrete claims through and leaves verifiability verdicts to downstream verification
+
+In `list[ClaimGroup]` mode, `MetadataExtractor` also applies event segregation and scoped date propagation (`TIME_RULE`): independent events without stated links remain in separate `ClaimGroup` entries with independent metadata, preventing date and location bleed across unrelated events.
 
 Both extractors also accept a `max_claims: int | None = 15` cap. When set, the prompt instructs the agent to prioritize central, load-bearing claims and skip trivia. Pass `None` for no cap.
 
