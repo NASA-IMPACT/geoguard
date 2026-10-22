@@ -10,7 +10,7 @@ DEFAULT_MAX_CLAIMS = 15
 
 CLAIM_RULES = """\
 Each claim must be:
-- ATOMIC: one factual assertion per claim
+- ATOMIC: one factual assertion per claim.
 - DECONTEXTUALIZED: include all proper nouns ('Hurricane Beryl' not 'the storm'), \
 absolute dates ('April 15, 2026' not 'that day'), and explicit locations \
 ('Houston, Texas' not 'the city'). Avoid pronouns and deictic references that \
@@ -21,8 +21,18 @@ another), MERGE them into one comprehensive claim.
 - FAITHFUL: every fact in a claim must be explicitly stated somewhere in the input. \
 You MAY combine facts from different parts of the input (e.g., to decontextualize a \
 claim with a date mentioned elsewhere). You MUST NOT add facts the input doesn't \
-state, infer beyond the text, or use prior knowledge to supplement claims.
-- VERIFIABLE: checkable against an external source.\
+state, infer beyond the text, or use prior knowledge to supplement claims. \
+Never assert a causal, temporal, or spatial relationship between facts or events \
+unless the input explicitly states that relationship.
+- FACTUAL AND RELEVANT: emit only concrete, objective factual assertions about the \
+events described. Filter out vague assertions, opinions, subjective impressions, \
+hedges, trivia, and conversational asides.
+- VERIFIABLE IN PRINCIPLE: claims must assert concrete, falsifiable facts rather than \
+subjective judgments. However, hard-to-verify is NEVER a reason to drop a claim. \
+If an assertion is a specific factual claim (even if it lacks an obvious external \
+data source), you MUST extract it and allow downstream verification to determine \
+its verdict. Never second-guess data availability or drop claims due to perceived \
+difficulty of verification.\
 """
 
 
@@ -45,7 +55,7 @@ DEFAULT_INSTRUCTIONS = (
 
 
 class Claim(BaseModel):
-    """A single factual claim extracted from input text — one unit of verification."""
+    """A single factual claim extracted from input text - one unit of verification."""
 
     claim: str = Field(
         description=(
@@ -55,7 +65,9 @@ class Claim(BaseModel):
             "absolute dates ('April 15, 2026' not 'that day'), and explicit "
             "locations ('Houston, Texas' not 'the city'). Avoid pronouns "
             "and deictic references that require surrounding context. "
-            "Every fact in the claim must be explicitly stated in the input."
+            "Every fact in the claim must be explicitly stated in the input. "
+            "Do not drop concrete factual assertions just because they lack "
+            "an obvious external data source."
         ),
     )
 
