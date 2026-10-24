@@ -121,7 +121,7 @@ GEOCODE_RULE = (
     "For any GeoLocation, lat and lon MUST come from the `geocode` tool. "
     "Never produce coordinates from prior knowledge. Call `geocode` once "
     "per distinct place name in the input. When calling `geocode`, pass "
-    "the FULLEST place name available from the input — include state, "
+    "the FULLEST place name available from the input: include state, "
     "country, or region whenever the input provides them (e.g., call "
     "`geocode('Galveston, Texas, USA')` not `geocode('Galveston')`) to "
     "avoid resolving to a wrong same-named place. If `geocode` returns "
@@ -130,21 +130,24 @@ GEOCODE_RULE = (
 
 
 TIME_RULE = (
-    "If the input states a date or time for any event, EVERY ClaimGroup "
-    "whose claims describe phenomena connected to that event MUST have "
-    "time_range set to that date — even when the groups have different "
-    "event_types or describe different phases of a causal chain. Never "
-    "leave time_range null on a ClaimGroup whose claims reference an "
-    "event whose date is stated elsewhere in the input."
+    "Date propagation scope: If the input states a date or time for an "
+    "event, set time_range to that date ONLY for the ClaimGroup(s) "
+    "describing phenomena connected to that specific event's causal chain. "
+    "NEVER propagate a date across independent, unrelated events. If an "
+    "independent event mentioned in the input has no stated date or time, "
+    "leave its time_range as None."
 )
 
 
 DEFAULT_INSTRUCTIONS = (
     "Extract structured geospatial metadata from the input. "
     "Identify each distinct event described in the input and return one entry "
-    "per event. For each, classify the event_type (flood, storm, or other) "
-    "and fill in the fields relevant to that event type. Use 'storm' for "
-    "hurricanes, cyclones, tropical storms, and similar atmospheric events. "
+    "per event. When multiple independent events are described without an "
+    "explicit causal, temporal, or spatial connection, keep them as separate "
+    "entries with independent metadata: do not inherit dates or locations "
+    "across distinct events. For each, classify the event_type (flood, storm, "
+    "or other) and fill in the fields relevant to that event type. Use 'storm' "
+    "for hurricanes, cyclones, tropical storms, and similar atmospheric events. "
     "Use 'other' with only the base fields when you cannot confidently "
     "classify the event. "
     "Leave any field you cannot confidently extract as None.\n\n"
@@ -168,10 +171,18 @@ def _group_cap_rule(max_claims: int | None) -> str:
 
 
 CLAIM_GROUP_INSTRUCTIONS = (
-    "Identify each distinct event described in the input. Information that "
-    "shares location, time, and a causal chain describes the SAME event — "
-    "group all such claims under ONE ClaimGroup. Do not create separate "
-    "groups for different aspects of the same event (cause, impact, response).\n\n"
+    "Identify each distinct event described in the input.\n\n"
+    "Event Grouping and Separation Guidance:\n"
+    "- SAME EVENT: Information that shares location, time, and an explicit causal "
+    "chain describes the same event. Group all such claims under ONE ClaimGroup. "
+    "Do not create separate groups for different phases or aspects of the same "
+    "event (e.g. cause, meteorological phenomena, immediate impact, response).\n"
+    "- INDEPENDENT EVENTS: When the input describes distinct events with no stated "
+    "causal, temporal, or spatial link (e.g. a car crash in Boston alongside a "
+    "hurricane in Texas), keep them in separate ClaimGroups with independent metadata. "
+    "Never allow one event to inherit another's date, location, or entities.\n"
+    "- DO NOT FABRICATE LINKS: Never invent or assert a causal, temporal, or "
+    "spatial connection between events unless the input explicitly states it.\n\n"
     "For each event, extract:\n"
     "1. Structured metadata (event_type, location, time_range, entities, "
     "and event-specific fields).\n"
